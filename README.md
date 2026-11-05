@@ -36,7 +36,7 @@ Use GitHub Pages (ou qualquer hospedagem com HTTPS, obrigatório para a câmera)
 | QR | Conteúdo | Onde é lido |
 |---|---|---|
 | Presencial | `COINES27\|P\|CODIGO` | Admin: Presença (1 por dia) e Kit (1 por pessoa) |
-| Lanche | `COINES27\|L\|CODIGO` | Admin: Lanche (1 por dia) |
+| Lanche | `COINES27\|L\|CODIGO` | Admin: Lanche (1 de manhã e 1 à tarde, por dia) |
 | Minicurso | `COINES27\|M\|MC01` | Participante, no painel |
 
 - **Frequência** = dias com presença ÷ dias do evento. Com 3 dias e mínimo de 75%, é preciso estar nos 3 dias. Com 67% bastam 2.

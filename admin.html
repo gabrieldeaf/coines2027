@@ -46,6 +46,9 @@ input:focus,select:focus{outline:none;border-color:var(--azul);box-shadow:0 0 0 
 .faixa h2{font-size:22px}
 .contador{text-align:right;font-size:14px;opacity:.9}
 .contador strong{display:block;font-size:26px;line-height:1}
+.turnos{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:-4px 0 14px}
+.turnos button{border:3px solid #F3D3B3;background:#fff;border-radius:14px;padding:14px;font:inherit;font-size:19px;font-weight:700;color:#8A4A08;cursor:pointer}
+.turnos button[aria-pressed="true"]{background:#D9730D;border-color:#D9730D;color:#fff}
 #leitor{width:100%;min-height:280px;background:#0D1424;border-radius:14px;overflow:hidden;display:grid;place-items:center;color:#9AA6C0;font-size:15px}
 .controles{display:flex;gap:8px;margin-top:10px}
 .controles .btn{flex:1}
@@ -120,6 +123,10 @@ td .btn{padding:6px 12px;font-size:14px}
         <h2 id="titulo-modo">Presença no evento</h2>
         <div class="contador"><strong id="cont-num">-</strong><span id="cont-rot">registros</span></div>
       </div>
+      <div class="turnos oculto" id="turnos" role="group" aria-label="Turno do lanche">
+        <button type="button" data-turno="manha" aria-pressed="true">☀️ Manhã</button>
+        <button type="button" data-turno="tarde" aria-pressed="false">🌇 Tarde</button>
+      </div>
       <div class="scan">
         <div class="cartao">
           <div id="leitor">Câmera desligada</div>
@@ -193,6 +200,8 @@ const MODOS = {
   lanche: 'Entrega do lanche'
 };
 let SENHA = sessao.get('coines27_admin');
+const TURNOS = { manha: 'Manhã', tarde: 'Tarde' };
+let turno = 'manha', turnoEscolhido = false;
 let INFO = null, modo = 'presenca', leitor = null, ocupado = false, ultimo = { t: '', em: 0 }, dados = null, audio = null;
 
 function esc(s) {
@@ -251,14 +260,34 @@ function selecionar(m) {
   if (tabelas) { pararCamera(); carregarTabela(); return; }
   modo = m;
   document.body.dataset.modo = m;
-  $('#titulo-modo').textContent = MODOS[m];
+  $('#turnos').classList.toggle('oculto', m !== 'lanche');
+  if (m === 'lanche' && !turnoEscolhido) turno = turnoSugerido();
+  atualizarCabecalho();
+}
+
+// Sugere o turno pelo relógio; a equipe pode trocar tocando em Manhã ou Tarde.
+function turnoSugerido() {
+  const h = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  return h < ((INFO && INFO.horaTarde) || '12:00') ? 'manha' : 'tarde';
+}
+
+function atualizarCabecalho() {
+  const lanche = modo === 'lanche';
+  document.querySelectorAll('#turnos button').forEach(b => b.setAttribute('aria-pressed', b.dataset.turno === turno));
+  $('#titulo-modo').textContent = MODOS[modo] + (lanche ? ' · ' + TURNOS[turno] : '');
   $('#cont-num').textContent = '-';
   $('#cont-rot').textContent = 'registros';
   ultimo = { t: '', em: 0 };
-  resultado('espera', '', m === 'lanche'
-    ? 'Leia o QR Code do LANCHE do participante.'
+  resultado('espera', '', lanche
+    ? 'Leia o QR Code do LANCHE. Turno: ' + TURNOS[turno].toUpperCase() + '.'
     : 'Leia o QR Code PRESENCIAL do participante.');
 }
+
+document.querySelectorAll('#turnos button').forEach(b => b.addEventListener('click', () => {
+  turno = b.dataset.turno;
+  turnoEscolhido = true;
+  atualizarCabecalho();
+}));
 
 // ---------- Câmera ----------
 $('#btn-camera').addEventListener('click', () => leitor ? pararCamera() : ligarCamera());
@@ -310,11 +339,11 @@ $('#form-manual').addEventListener('submit', e => {
 
 async function processar(entrada) {
   ocupado = true;
-  const modoAtual = modo;
+  const modoAtual = modo, turnoAtual = turno;
   resultado('espera', '', 'Verificando...');
   try {
-    const j = await api('adminScan', { modo: modoAtual, qr: entrada });
-    if (modoAtual !== modo) return;
+    const j = await api('adminScan', { modo: modoAtual, turno: turnoAtual, qr: entrada });
+    if (modoAtual !== modo || turnoAtual !== turno) return;
     resultado(j.status, j.nome, j.mensagem, j.cpf);
     $('#cont-num').textContent = j.total;
     $('#cont-rot').textContent = j.rotuloTotal;

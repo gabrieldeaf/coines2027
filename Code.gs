@@ -19,6 +19,7 @@ const CONFIG = {
   CARGA_HORARIA_EVENTO: 24,     // horas
   VALIDAR_HORARIO_MINICURSO: true, // só aceita o QR do minicurso no dia e horário dele
   TOLERANCIA_MIN: 30,           // minutos antes do início e depois do fim
+  HORA_TARDE: '12:00',          // a partir deste horário o admin sugere o lanche da tarde
   FUSO: 'America/Sao_Paulo',
   PREFIXO_QR: 'COINES27'
 };
@@ -27,7 +28,7 @@ const ABAS = {
   Inscritos: ['Codigo', 'CPF', 'Nome', 'Email', 'Telefone', 'Instituicao', 'Identidade', 'Atuacao', 'Cidade', 'UF', 'DataInscricao'],
   Presenca: ['DataHora', 'Dia', 'Codigo', 'CPF', 'Nome'],
   Kit: ['DataHora', 'Codigo', 'CPF', 'Nome'],
-  Lanche: ['DataHora', 'Dia', 'Codigo', 'CPF', 'Nome'],
+  Lanche: ['DataHora', 'Dia', 'Turno', 'Codigo', 'CPF', 'Nome'],
   Minicursos: ['ID', 'Titulo', 'Data', 'HoraInicio', 'HoraFim', 'Local', 'CargaHoraria', 'Ministrante'],
   PresencaMinicurso: ['DataHora', 'MinicursoID', 'Titulo', 'Codigo', 'CPF', 'Nome']
 };
@@ -65,6 +66,8 @@ function saida(obj) {
 
 /* ======================= Planilha ======================= */
 
+const _abasChecadas = {};
+
 function aba(nome) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sh = ss.getSheetByName(nome);
@@ -72,7 +75,17 @@ function aba(nome) {
     sh = ss.insertSheet(nome);
     sh.getRange(1, 1, 1, ABAS[nome].length).setValues([ABAS[nome]]).setFontWeight('bold');
     sh.setFrozenRows(1);
+  } else if (!_abasChecadas[nome]) {
+    // Abas criadas numa versão anterior: acrescenta no fim as colunas novas que faltarem.
+    const ult = sh.getLastColumn();
+    const cab = ult ? sh.getRange(1, 1, 1, ult).getDisplayValues()[0].map(c => String(c).trim()) : [];
+    const faltam = ABAS[nome].filter(c => cab.indexOf(c) < 0);
+    if (faltam.length) {
+      sh.getRange(1, ult + 1, 1, faltam.length).setValues([faltam]).setFontWeight('bold');
+      sh.getRange(1, ult + 1, sh.getMaxRows(), faltam.length).setNumberFormat('@');
+    }
   }
+  _abasChecadas[nome] = true;
   return sh;
 }
 
@@ -91,9 +104,12 @@ function ler(nome) {
 }
 
 function gravar(nome, obj) {
-  // O apóstrofo força texto: mantém zeros do CPF e evita fórmulas digitadas.
-  const linha = ABAS[nome].map(c => (obj[c] === undefined || obj[c] === '') ? '' : "'" + obj[c]);
-  aba(nome).appendRow(linha);
+  // Grava pelo nome da coluna (não pela posição) e usa apóstrofo para forçar texto:
+  // mantém os zeros do CPF e evita fórmulas digitadas.
+  const sh = aba(nome);
+  const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(c => String(c).trim());
+  const linha = cab.map(c => (obj[c] === undefined || obj[c] === '') ? '' : "'" + obj[c]);
+  sh.appendRow(linha);
 }
 
 function comTrava(fn) {
@@ -136,6 +152,9 @@ function mascaraCpf(v) {
 const hoje = () => Utilities.formatDate(new Date(), CONFIG.FUSO, 'yyyy-MM-dd');
 const agora = () => Utilities.formatDate(new Date(), CONFIG.FUSO, 'dd/MM/yyyy HH:mm:ss');
 const horaAgora = () => Utilities.formatDate(new Date(), CONFIG.FUSO, 'HH:mm');
+
+const TURNOS = { manha: 'Manhã', tarde: 'Tarde' };
+const turnoAtual = () => (horaAgora() < CONFIG.HORA_TARDE ? 'manha' : 'tarde');
 
 function normData(v) {
   const s = String(v || '').trim();
@@ -380,7 +399,10 @@ function checarSenha(req) {
 
 function adminLogin(req) {
   checarSenha(req);
-  return { ok: true, evento: CONFIG.EVENTO, prefixo: CONFIG.PREFIXO_QR, abas: Object.keys(ABAS) };
+  return {
+    ok: true, evento: CONFIG.EVENTO, prefixo: CONFIG.PREFIXO_QR, abas: Object.keys(ABAS),
+    turnoAtual: turnoAtual(), horaTarde: CONFIG.HORA_TARDE
+  };
 }
 
 function adminScan(req) {
@@ -388,10 +410,15 @@ function adminScan(req) {
   const modos = {
     presenca: { aba: 'Presenca', tipo: 'P', porDia: true, feito: 'Presença registrada.' },
     kit: { aba: 'Kit', tipo: 'P', porDia: false, feito: 'Kit de material entregue.' },
-    lanche: { aba: 'Lanche', tipo: 'L', porDia: true, feito: 'Lanche liberado.' }
+    lanche: { aba: 'Lanche', tipo: 'L', porDia: true, porTurno: true, feito: 'Lanche liberado.' }
   };
   const cfg = modos[req.modo];
   if (!cfg) throw new Error('Modo inválido.');
+
+  // Lanche: 1 de manhã e 1 à tarde por dia. O admin informa o turno; sem ele, usa o horário.
+  const turno = cfg.porTurno ? (TURNOS[req.turno] ? req.turno : turnoAtual()) : '';
+  const turnoNome = turno ? TURNOS[turno] : '';
+  const daTurno = turno === 'manha' ? 'da manhã' : 'da tarde';
 
   const nomesQr = { P: 'QR Code presencial', L: 'QR Code do lanche', M: 'QR Code de minicurso' };
   const entrada = String(req.qr || '').trim();
@@ -412,20 +439,24 @@ function adminScan(req) {
   const dia = hoje();
   return comTrava(() => {
     const regs = ler(cfg.aba);
-    const considerados = cfg.porDia ? regs.filter(r => normData(r.Dia) === dia) : regs;
+    const considerados = cfg.porDia
+      ? regs.filter(r => normData(r.Dia) === dia && (!turno || r.Turno === turnoNome))
+      : regs;
     const anterior = considerados.find(r => r.Codigo === insc.Codigo);
     let status = 'ok';
     let mensagem;
     if (anterior) {
       status = 'repetido';
-      mensagem = cfg.porDia
-        ? 'Já registrado hoje às ' + anterior.DataHora.slice(11, 16) + '.'
-        : 'Já recebeu em ' + anterior.DataHora.slice(0, 16) + '.';
+      const hora = anterior.DataHora.slice(11, 16);
+      if (turno) mensagem = 'Já pegou o lanche ' + daTurno + ' hoje, às ' + hora + '.';
+      else if (cfg.porDia) mensagem = 'Já registrado hoje às ' + hora + '.';
+      else mensagem = 'Já recebeu em ' + anterior.DataHora.slice(0, 16) + '.';
     } else {
       const reg = { DataHora: agora(), Codigo: insc.Codigo, CPF: insc.CPF, Nome: insc.Nome };
       if (cfg.porDia) reg.Dia = dia;
+      if (turno) reg.Turno = turnoNome;
       gravar(cfg.aba, reg);
-      mensagem = cfg.feito;
+      mensagem = turno ? 'Lanche ' + daTurno + ' liberado.' : cfg.feito;
       if (req.modo === 'presenca' && CONFIG.DIAS_EVENTO.indexOf(dia) < 0) {
         mensagem += ' Atenção: hoje não é dia do evento, não conta na frequência.';
       }
@@ -433,7 +464,8 @@ function adminScan(req) {
     return {
       ok: true, status: status, nome: insc.Nome, cpf: mascaraCpf(insc.CPF), mensagem: mensagem,
       total: considerados.length + (status === 'ok' ? 1 : 0),
-      rotuloTotal: cfg.porDia ? 'hoje' : 'no total'
+      rotuloTotal: turno ? turnoNome.toLowerCase() + ' de hoje' : (cfg.porDia ? 'hoje' : 'no total'),
+      turno: turno
     };
   });
 }
