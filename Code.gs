@@ -35,6 +35,30 @@ const CONFIG = {
   RESPONDER_PARA: ''            // opcional: e-mail para respostas (ex.: coines@ines.gov.br)
 };
 
+/**
+ * Categorias que a organização cadastra no admin (aba Cadastrar).
+ * frase: trecho do certificado que vem antes do nome do evento.
+ * {A} é trocado pelo título da atividade (quando informado), no formato de "ativ" (%s = título).
+ * campo: rótulo do campo de título no formulário (vazio = sem campo).
+ */
+const CATEGORIAS = [
+  { nome: 'Participante', frase: 'participou do' },
+  { nome: 'Autoridade', frase: 'participou, como autoridade, do' },
+  { nome: 'Comissão Científica e Organizadora', frase: 'integrou a Comissão Científica e Organizadora do' },
+  { nome: 'Comissão Organizadora', frase: 'integrou a Comissão Organizadora do' },
+  { nome: 'Festival de Arte e Cultura Surda Artistas', frase: 'participou como artista do Festival de Arte e Cultura Surda{A}, no', ativ: ' com a obra "%s"', campo: 'Obra ou apresentação' },
+  { nome: 'Mediador de Sessão de Comunicação', frase: 'atuou como mediador(a) da Sessão de Comunicação{A} no', ativ: ' "%s"', campo: 'Nome da sessão' },
+  { nome: 'Participantes de Minicurso', frase: 'participou do minicurso{A} no', ativ: ' "%s"', campo: 'Título do minicurso' },
+  { nome: 'Proponentes de Minicurso', frase: 'ministrou o minicurso{A} no', ativ: ' "%s"', campo: 'Título do minicurso' },
+  { nome: 'Monitoria', frase: 'atuou na monitoria do' },
+  { nome: 'Palestrante', frase: 'proferiu a palestra{A} no', ativ: ' "%s"', campo: 'Título da palestra' },
+  { nome: 'Mediador', frase: 'atuou como mediador(a){A} no', ativ: ' da mesa "%s"', campo: 'Nome da mesa' },
+  { nome: 'Proponentes de Pôsteres', frase: 'apresentou o pôster{A} no', ativ: ' "%s"', campo: 'Título do pôster' },
+  { nome: 'Proponentes de Comunicações', frase: 'apresentou a comunicação{A} no', ativ: ' "%s"', campo: 'Título da comunicação' }
+];
+
+const ORIGEM_ORG = 'Cadastro pela organização'; // não ocupa as vagas do sorteio
+
 const ST = {
   INSCRITO: 'Inscrito',
   SORTEADO: 'Sorteado',
@@ -47,6 +71,7 @@ const ST = {
 const ABAS = {
   Inscritos: ['Codigo', 'CPF', 'Nome', 'Email', 'Telefone', 'Instituicao', 'Identidade', 'Atuacao', 'Cidade', 'UF', 'DataInscricao',
     'Status', 'Origem', 'PosicaoEspera', 'PrazoConfirmacao', 'Resposta', 'RespostaEm', 'Token'],
+  Funcoes: ['ID', 'DataHora', 'Codigo', 'CPF', 'Nome', 'Categoria', 'Atividade', 'CargaHoraria'],
   Emails: ['Criado', 'Tipo', 'Codigo', 'Email', 'Nome', 'Status', 'Enviado', 'Erro'],
   Presenca: ['DataHora', 'Dia', 'Codigo', 'CPF', 'Nome'],
   Kit: ['DataHora', 'Codigo', 'CPF', 'Nome'],
@@ -74,7 +99,8 @@ function doPost(e) {
   const acoes = {
     buscarCpf, inscrever, painel, registrarMinicurso, certificado, responder,
     adminLogin, adminScan, adminTabela,
-    adminResumo, adminSortear, adminPedirConfirmacao, adminChamarEspera, adminEnviarEmails
+    adminResumo, adminSortear, adminPedirConfirmacao, adminChamarEspera, adminEnviarEmails,
+    adminBuscarPessoa, adminCadastrar, adminFuncoes, adminRemoverFuncao, adminCertificado
   };
   const fn = acoes[req.acao];
   if (!fn) return saida({ ok: false, erro: 'Ação desconhecida.' });
@@ -341,7 +367,9 @@ function montarPainel(insc) {
     kitRecebido: ler('Kit').some(r => r.Codigo === insc.Codigo),
     qrPresencial: CONFIG.PREFIXO_QR + '|P|' + insc.Codigo,
     qrLanche: CONFIG.PREFIXO_QR + '|L|' + insc.Codigo,
-    minicursos: minicursosDo(insc.Codigo)
+    minicursos: minicursosDo(insc.Codigo),
+    funcoes: ler('Funcoes').filter(f => f.Codigo === insc.Codigo)
+      .map(f => ({ id: f.ID, categoria: f.Categoria, atividade: f.Atividade, ch: f.CargaHoraria }))
   };
 }
 
@@ -412,17 +440,46 @@ function registrarMinicurso(req) {
   });
 }
 
-function certificado(req) {
-  const insc = inscritoPorCodigo(req.codigo);
-  if (!insc) throw new Error('Inscrição não encontrada.');
-  const nome = insc.Nome.toUpperCase();
-  const cpf = fmtCpf(insc.CPF);
-  const base = {
+function baseCertificado() {
+  return {
     titulo: 'CERTIFICADO',
     evento: CONFIG.EVENTO,
     localData: CONFIG.CIDADE + ', ' + dataExtenso() + '.',
     assinatura: CONFIG.ASSINATURA
   };
+}
+
+// Certificado de uma categoria cadastrada pela organização (aba Funcoes).
+function certificadoFuncao(f) {
+  const cat = CATEGORIAS.find(c => c.nome === f.Categoria) || { frase: 'participou do' };
+  const ativ = f.Atividade && cat.ativ ? cat.ativ.replace('%s', f.Atividade) : '';
+  let texto = 'Certificamos que ' + f.Nome.toUpperCase() + ', CPF ' + fmtCpf(f.CPF) + ', ' +
+    cat.frase.replace('{A}', ativ) + ' ' + CONFIG.EVENTO + ', promovido pelo ' + CONFIG.INSTITUICAO +
+    ', realizado de ' + CONFIG.PERIODO_TEXTO;
+  if (f.CargaHoraria) texto += ', com carga horária de ' + f.CargaHoraria + ' horas';
+  texto += '.';
+  const slug = String(f.Categoria || 'funcao').normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return Object.assign(baseCertificado(), {
+    texto: texto,
+    codigoValidacao: codigoValidacao(f.Codigo + '|FUNCAO|' + f.ID),
+    arquivo: 'certificado-' + slug + '.pdf'
+  });
+}
+
+function certificado(req) {
+  const insc = inscritoPorCodigo(req.codigo);
+  if (!insc) throw new Error('Inscrição não encontrada.');
+  const nome = insc.Nome.toUpperCase();
+  const cpf = fmtCpf(insc.CPF);
+  const base = baseCertificado();
+
+  if (req.tipo === 'funcao') {
+    const f = ler('Funcoes').find(x => x.ID === String(req.id || '') && x.Codigo === insc.Codigo);
+    if (!f) throw new Error('Certificado não encontrado.');
+    f.Nome = insc.Nome;
+    return { ok: true, cert: certificadoFuncao(f) };
+  }
 
   if (req.tipo === 'evento') {
     const f = frequencia(insc.Codigo);
@@ -473,8 +530,107 @@ function adminLogin(req) {
   checarSenha(req);
   return {
     ok: true, evento: CONFIG.EVENTO, prefixo: CONFIG.PREFIXO_QR, abas: Object.keys(ABAS),
-    turnoAtual: turnoAtual(), horaTarde: CONFIG.HORA_TARDE
+    turnoAtual: turnoAtual(), horaTarde: CONFIG.HORA_TARDE,
+    categorias: CATEGORIAS.map(c => ({ nome: c.nome, campo: c.campo || '' }))
   };
+}
+
+/* ---------- Cadastro pela organização (categorias) ---------- */
+
+function adminBuscarPessoa(req) {
+  checarSenha(req);
+  const insc = inscritoPorCpf(req.cpf);
+  if (!insc) return { ok: true, existe: false };
+  return {
+    ok: true, existe: true, nome: insc.Nome, email: insc.Email, situacao: situacao(insc).titulo,
+    funcoes: ler('Funcoes').filter(f => f.Codigo === insc.Codigo).map(f => f.Categoria)
+  };
+}
+
+function adminCadastrar(req) {
+  checarSenha(req);
+  const cpf = normCpf(req.cpf);
+  if (!cpfValido(cpf)) throw new Error('CPF inválido.');
+  const nome = limpa(req.nome);
+  if (nome.split(' ').length < 2) throw new Error('Informe o nome completo.');
+  const email = limpa(req.email).toLowerCase();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('E-mail inválido.');
+  const cat = CATEGORIAS.find(c => c.nome === req.categoria);
+  if (!cat) throw new Error('Escolha a categoria.');
+  const atividade = cat.campo ? limpa(req.atividade) : '';
+  const ch = soDigitos(req.cargaHoraria).slice(0, 3);
+
+  return comTrava(() => {
+    let insc = inscritoPorCpf(cpf);
+    if (!insc) {
+      insc = {
+        Codigo: novoCodigo(), CPF: cpf, Nome: nome, Email: email, DataInscricao: agora(),
+        Status: ST.CONFIRMADO, Origem: ORIGEM_ORG, Token: novoToken()
+      };
+      gravar('Inscritos', insc);
+    } else {
+      const alt = { _linha: insc._linha };
+      if (nome !== insc.Nome) alt.Nome = nome;
+      if (email && email !== insc.Email) alt.Email = email;
+      if (statusDe(insc) !== ST.CONFIRMADO) {
+        alt.Status = ST.CONFIRMADO;
+        // Quem tinha vaga do sorteio continua ocupando a vaga; os demais entram como extra.
+        if (statusDe(insc) !== ST.SORTEADO) alt.Origem = ORIGEM_ORG;
+        alt.PosicaoEspera = '';
+      }
+      atualizar('Inscritos', [alt]);
+      insc = inscritoPorCpf(cpf);
+    }
+
+    const funcoes = ler('Funcoes');
+    let f = funcoes.find(x => x.Codigo === insc.Codigo && x.Categoria === cat.nome && (x.Atividade || '') === atividade);
+    const repetida = !!f;
+    if (!f) {
+      f = { ID: 'F' + novoCodigo().slice(0, 8), DataHora: agora(), Codigo: insc.Codigo, CPF: cpf, Nome: insc.Nome,
+        Categoria: cat.nome, Atividade: atividade, CargaHoraria: ch };
+      gravar('Funcoes', f);
+    }
+    return {
+      ok: true, repetida: repetida,
+      mensagem: repetida ? insc.Nome + ' já estava cadastrado(a) como ' + cat.nome + '.' : insc.Nome + ' cadastrado(a) como ' + cat.nome + '.',
+      pessoa: pessoaFuncao(f, insc)
+    };
+  });
+}
+
+function pessoaFuncao(f, insc) {
+  return {
+    id: f.ID, codigo: f.Codigo, nome: insc ? insc.Nome : f.Nome, cpf: mascaraCpf(f.CPF), categoria: f.Categoria,
+    atividade: f.Atividade, ch: f.CargaHoraria, data: f.DataHora,
+    qr: CONFIG.PREFIXO_QR + '|P|' + f.Codigo
+  };
+}
+
+function adminFuncoes(req) {
+  checarSenha(req);
+  const porCodigo = {};
+  ler('Inscritos').forEach(i => { porCodigo[i.Codigo] = i; });
+  const lista = ler('Funcoes').map(f => pessoaFuncao(f, porCodigo[f.Codigo])).reverse();
+  return { ok: true, lista: lista };
+}
+
+function adminRemoverFuncao(req) {
+  checarSenha(req);
+  return comTrava(() => {
+    const f = ler('Funcoes').find(x => x.ID === String(req.id || ''));
+    if (!f) throw new Error('Cadastro não encontrado.');
+    aba('Funcoes').deleteRow(f._linha);
+    return { ok: true, mensagem: 'Removido: ' + f.Nome + ' (' + f.Categoria + '). A inscrição e o QR Code continuam válidos.' };
+  });
+}
+
+function adminCertificado(req) {
+  checarSenha(req);
+  const f = ler('Funcoes').find(x => x.ID === String(req.id || ''));
+  if (!f) throw new Error('Cadastro não encontrado.');
+  const insc = inscritoPorCodigo(f.Codigo);
+  if (insc) f.Nome = insc.Nome;
+  return { ok: true, cert: certificadoFuncao(f) };
 }
 
 function adminScan(req) {
@@ -600,7 +756,8 @@ function rotina() {
  */
 function desfazerSorteio() {
   comTrava(() => {
-    atualizar('Inscritos', ler('Inscritos').map(i => ({
+    // Quem foi cadastrado pela organização continua confirmado.
+    atualizar('Inscritos', ler('Inscritos').filter(i => i.Origem !== ORIGEM_ORG).map(i => ({
       _linha: i._linha, Status: ST.INSCRITO, Origem: '', PosicaoEspera: '',
       PrazoConfirmacao: '', Resposta: '', RespostaEm: ''
     })));
@@ -618,6 +775,8 @@ function novoToken() {
 }
 
 const statusDe = i => i.Status || ST.INSCRITO;
+// Vagas do sorteio: quem foi cadastrado pela organização não conta.
+const ocupaVaga = i => (statusDe(i) === ST.SORTEADO || statusDe(i) === ST.CONFIRMADO) && i.Origem !== ORIGEM_ORG;
 const agoraIso = () => Utilities.formatDate(new Date(), CONFIG.FUSO, 'yyyy-MM-dd HH:mm');
 
 // Prazo: fim do dia (23:59) daqui a N dias.
@@ -732,7 +891,7 @@ function encerrarPrazos() {
 function chamarEspera() {
   if (!sorteioFeito()) return 0;
   const lista = ler('Inscritos');
-  const ocupadas = lista.filter(i => statusDe(i) === ST.SORTEADO || statusDe(i) === ST.CONFIRMADO).length;
+  const ocupadas = lista.filter(ocupaVaga).length;
   const livres = CONFIG.VAGAS - ocupadas;
   if (livres <= 0) return 0;
   const chamados = lista
@@ -751,7 +910,7 @@ function resumo() {
   const lista = ler('Inscritos');
   const conta = st => lista.filter(i => statusDe(i) === st).length;
   const sorteados = lista.filter(i => statusDe(i) === ST.SORTEADO);
-  const ocupadas = sorteados.length + conta(ST.CONFIRMADO);
+  const ocupadas = lista.filter(ocupaVaga).length;
   const emails = ler('Emails');
   let cota = null;
   try { cota = MailApp.getRemainingDailyQuota(); } catch (e) {}
@@ -768,6 +927,7 @@ function resumo() {
     expirados: conta(ST.EXPIRADO),
     espera: conta(ST.ESPERA),
     vagasLivres: Math.max(CONFIG.VAGAS - ocupadas, 0),
+    organizacao: lista.filter(i => i.Origem === ORIGEM_ORG).length,
     emailsPendentes: emails.filter(e => e.Status === 'Pendente').length,
     emailsEnviados: emails.filter(e => e.Status === 'Enviado').length,
     emailsErro: emails.filter(e => e.Status === 'Erro').length,

@@ -41,6 +41,22 @@ input:focus,select:focus{outline:none;border-color:var(--azul);box-shadow:0 0 0 
 .abas [data-modo="lanche"][aria-selected="true"]{background:#D9730D}
 .abas [data-modo="tabelas"][aria-selected="true"]{background:var(--texto)}
 .abas [data-modo="sorteio"][aria-selected="true"]{background:#1F7A6B}
+.abas [data-modo="cadastro"][aria-selected="true"]{background:#8A3B8F}
+/* Cadastro pela organização */
+.cad-grade{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:16px;align-items:start}
+.cad-info{margin:6px 0 0;min-height:1.2em}
+.cad-info.existe{color:#8A3B8F;font-weight:700}
+.cad-resultado{text-align:center;position:sticky;top:12px}
+.cad-vazio{color:var(--suave);padding:40px 10px}
+.cat-tag{display:inline-block;background:#F3E6F4;color:#6E2A72;font-weight:700;font-size:14px;padding:4px 10px;border-radius:999px;margin:6px 0}
+.cad-resultado .nome{font-size:24px;font-weight:700;margin-top:4px;word-break:break-word}
+.cad-resultado .ativ{color:var(--suave);margin:2px 0 0}
+#cad-qr{max-width:230px;margin:14px auto;padding:12px;border:2px dashed var(--borda);border-radius:14px}
+#cad-qr canvas,#cad-qr img{width:100%;height:auto}
+.cad-acoes{display:grid;gap:8px}
+.acoes-linha{display:flex;gap:6px}
+.btn.perigo{background:#FDE8E8;color:var(--vermelho)}
+@media (max-width:760px){.cad-grade{grid-template-columns:1fr}.cad-resultado{position:static}}
 /* Sorteio */
 .numeros{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px}
 .num{background:#fff;border:1px solid var(--borda);border-radius:14px;padding:14px}
@@ -133,8 +149,59 @@ td .btn{padding:6px 12px;font-size:14px}
       <button role="tab" data-modo="kit" aria-selected="false">🎒 Kit material</button>
       <button role="tab" data-modo="lanche" aria-selected="false">🥪 Lanche</button>
       <button role="tab" data-modo="sorteio" aria-selected="false">🎲 Sorteio</button>
+      <button role="tab" data-modo="cadastro" aria-selected="false">👤 Cadastrar</button>
       <button role="tab" data-modo="tabelas" aria-selected="false">📋 Tabelas</button>
     </nav>
+
+    <div id="painel-cadastro" class="oculto">
+      <div class="cad-grade">
+        <article class="cartao">
+          <h2>Cadastrar pessoa</h2>
+          <p class="info" style="margin:6px 0 0">Palestrantes, comissão, monitoria, artistas e outros. Recebem QR Code do evento e certificado da categoria, sem passar pelo sorteio.</p>
+          <form id="form-cad" novalidate>
+            <label for="cad-cpf">CPF</label>
+            <input id="cad-cpf" inputmode="numeric" autocomplete="off" placeholder="000.000.000-00" maxlength="14">
+            <p class="info cad-info" id="cad-info"></p>
+            <label for="cad-nome">Nome completo (como vai sair no certificado)</label>
+            <input id="cad-nome" autocomplete="off">
+            <label for="cad-email">E-mail (opcional)</label>
+            <input id="cad-email" type="email" autocomplete="off">
+            <label for="cad-cat">Categoria</label>
+            <select id="cad-cat"></select>
+            <div id="cad-ativ-box" class="oculto">
+              <label for="cad-ativ" id="cad-ativ-rot">Título</label>
+              <input id="cad-ativ" autocomplete="off" placeholder="Opcional, entra no certificado">
+            </div>
+            <label for="cad-ch">Carga horária em horas (opcional)</label>
+            <input id="cad-ch" inputmode="numeric" maxlength="3" placeholder="Ex.: 4">
+            <p class="erro" id="erro-cad" role="alert"></p>
+            <button class="btn" type="submit" style="width:100%">Cadastrar</button>
+          </form>
+        </article>
+        <article class="cartao cad-resultado" id="cad-resultado">
+          <div class="cad-vazio">
+            <div style="font-size:44px">🪪</div>
+            <p>Depois de cadastrar, o QR Code e o certificado aparecem aqui.</p>
+          </div>
+        </article>
+      </div>
+      <article class="cartao" style="margin-top:16px">
+        <div class="filtros">
+          <div>
+            <label for="cad-filtro">Categoria</label>
+            <select id="cad-filtro"><option value="">Todas</option></select>
+          </div>
+          <div class="busca">
+            <label for="cad-busca">Buscar</label>
+            <input id="cad-busca" placeholder="Nome, CPF, título...">
+          </div>
+          <button class="btn" id="cad-atualizar" type="button">Atualizar</button>
+          <button class="btn claro" id="cad-csv" type="button">Exportar CSV</button>
+        </div>
+        <p class="info" id="cad-total"></p>
+        <div class="tabela-caixa"><table id="cad-tabela"></table></div>
+      </article>
+    </div>
 
     <div id="painel-sorteio" class="oculto">
       <div class="numeros" id="numeros"></div>
@@ -230,6 +297,8 @@ td .btn{padding:6px 12px;font-size:14px}
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="certificado.js"></script>
 <script>
 // ======== CONFIGURAÇÃO ========
 const API_URL = 'https://script.google.com/macros/s/AKfycbzb5hsbdBBwsJed3uv56RUdF7KHMCB96pXmEGLMw4qPiLcH4huUl8Q-gKINS39XWpIw/exec'; // a mesma URL usada no index.html
@@ -283,6 +352,9 @@ async function entrar() {
   $('#tela-admin').classList.remove('oculto');
   $('#btn-sair').classList.remove('oculto');
   $('#sel-aba').innerHTML = INFO.abas.map(a => `<option>${esc(a)}</option>`).join('');
+  const cats = INFO.categorias || [];
+  $('#cad-cat').innerHTML = '<option value="">Selecione</option>' + cats.map(c => `<option>${esc(c.nome)}</option>`).join('');
+  $('#cad-filtro').innerHTML = '<option value="">Todas</option>' + cats.map(c => `<option>${esc(c.nome)}</option>`).join('');
   selecionar('presenca');
 }
 
@@ -301,12 +373,14 @@ document.querySelectorAll('.abas button').forEach(b => b.addEventListener('click
 
 function selecionar(m) {
   document.querySelectorAll('.abas button').forEach(b => b.setAttribute('aria-selected', b.dataset.modo === m));
-  const tabelas = m === 'tabelas', sorteio = m === 'sorteio';
-  $('#painel-scan').classList.toggle('oculto', tabelas || sorteio);
+  const tabelas = m === 'tabelas', sorteio = m === 'sorteio', cadastro = m === 'cadastro';
+  $('#painel-scan').classList.toggle('oculto', tabelas || sorteio || cadastro);
   $('#painel-tabelas').classList.toggle('oculto', !tabelas);
   $('#painel-sorteio').classList.toggle('oculto', !sorteio);
+  $('#painel-cadastro').classList.toggle('oculto', !cadastro);
   if (tabelas) { pararCamera(); carregarTabela(); return; }
   if (sorteio) { pararCamera(); carregarResumo(); return; }
+  if (cadastro) { pararCamera(); carregarFuncoes(); return; }
   modo = m;
   document.body.dataset.modo = m;
   $('#turnos').classList.toggle('oculto', m !== 'lanche');
@@ -445,6 +519,166 @@ function bip(status) {
   else { tom(220, 0, 0.45); if (navigator.vibrate) navigator.vibrate(400); }
 }
 
+// ---------- Cadastro pela organização ----------
+let FUNCOES = [], ultimoCad = null;
+
+function mascaraCpf(v) {
+  v = v.replace(/\D/g, '').slice(0, 11);
+  return v.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})$/, '$1-$2');
+}
+function cpfValido(v) {
+  const c = v.replace(/\D/g, '');
+  if (c.length !== 11 || /^(\d)\1+$/.test(c)) return false;
+  for (let t = 9; t < 11; t++) {
+    let s = 0;
+    for (let i = 0; i < t; i++) s += Number(c[i]) * (t + 1 - i);
+    if (((s * 10) % 11) % 10 !== Number(c[t])) return false;
+  }
+  return true;
+}
+
+let buscaCpf = '';
+$('#cad-cpf').addEventListener('input', async e => {
+  e.target.value = mascaraCpf(e.target.value);
+  const cpf = e.target.value;
+  const info = $('#cad-info');
+  info.className = 'info cad-info'; info.textContent = '';
+  if (cpf.replace(/\D/g, '').length < 11) return;
+  if (!cpfValido(cpf)) { info.textContent = 'CPF inválido.'; return; }
+  buscaCpf = cpf;
+  try {
+    const j = await api('adminBuscarPessoa', { cpf });
+    if (buscaCpf !== $('#cad-cpf').value || !j.existe) { if (!j.existe) info.textContent = 'CPF novo: a pessoa será criada já confirmada.'; return; }
+    if (!$('#cad-nome').value) $('#cad-nome').value = j.nome;
+    if (!$('#cad-email').value && j.email) $('#cad-email').value = j.email;
+    info.classList.add('existe');
+    info.textContent = 'Já está no sistema (' + j.situacao + ')' + (j.funcoes.length ? '. Categorias: ' + j.funcoes.join(', ') : '') + '.';
+  } catch (err) { info.textContent = err.message; }
+});
+
+$('#cad-cat').addEventListener('change', () => {
+  const c = (INFO.categorias || []).find(x => x.nome === $('#cad-cat').value);
+  const tem = !!(c && c.campo);
+  $('#cad-ativ-box').classList.toggle('oculto', !tem);
+  if (tem) $('#cad-ativ-rot').textContent = c.campo + ' (opcional)';
+  else $('#cad-ativ').value = '';
+});
+
+$('#form-cad').addEventListener('submit', async e => {
+  e.preventDefault();
+  const erro = $('#erro-cad');
+  const dados = {
+    cpf: $('#cad-cpf').value, nome: $('#cad-nome').value.trim(), email: $('#cad-email').value.trim(),
+    categoria: $('#cad-cat').value, atividade: $('#cad-ativ').value.trim(), cargaHoraria: $('#cad-ch').value.trim()
+  };
+  if (!cpfValido(dados.cpf)) return (erro.textContent = 'CPF inválido.');
+  if (dados.nome.split(/\s+/).length < 2) return (erro.textContent = 'Informe o nome completo.');
+  if (!dados.categoria) return (erro.textContent = 'Escolha a categoria.');
+  erro.textContent = '';
+  const botao = e.target.querySelector('button[type=submit]');
+  botao.disabled = true; botao.textContent = 'Cadastrando...';
+  try {
+    const j = await api('adminCadastrar', dados);
+    mostrarCadastrado(j.pessoa, j.mensagem);
+    // Mantém a categoria para cadastrar o próximo da mesma categoria mais rápido.
+    ['#cad-cpf', '#cad-nome', '#cad-email', '#cad-ativ'].forEach(s => { $(s).value = ''; });
+    $('#cad-info').textContent = '';
+    $('#cad-cpf').focus();
+    carregarFuncoes();
+  } catch (err) { erro.textContent = err.message; }
+  finally { botao.disabled = false; botao.textContent = 'Cadastrar'; }
+});
+
+function mostrarCadastrado(p, mensagem) {
+  ultimoCad = p;
+  $('#cad-resultado').innerHTML = `
+    <p class="info" style="color:var(--verde);font-weight:700;margin:0">${esc(mensagem || '')}</p>
+    <div class="nome">${esc(p.nome)}</div>
+    <div class="cat-tag">${esc(p.categoria)}</div>
+    ${p.atividade ? `<p class="ativ">${esc(p.atividade)}</p>` : ''}
+    <p class="info" style="margin:4px 0 0">CPF ${esc(p.cpf)}${p.ch ? ' · ' + esc(p.ch) + 'h' : ''}</p>
+    <div id="cad-qr"></div>
+    <div class="cad-acoes">
+      <button class="btn" type="button" data-cert-id="${esc(p.id)}">📄 Baixar certificado</button>
+      <button class="btn claro" type="button" id="cad-salvar-qr">Salvar QR Code</button>
+    </div>
+    <p class="info" style="margin-top:12px">A pessoa também pode entrar no site de inscrição com o CPF para ver o QR Code e baixar o certificado.</p>`;
+  new QRCode($('#cad-qr'), { text: p.qr, width: 220, height: 220, correctLevel: QRCode.CorrectLevel.M });
+  $('#cad-salvar-qr').addEventListener('click', () => {
+    const c = $('#cad-qr canvas');
+    if (!c) return;
+    const a = document.createElement('a');
+    a.href = c.toDataURL('image/png');
+    a.download = 'qr-' + p.nome.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-') + '.png';
+    a.click();
+  });
+}
+
+async function carregarFuncoes() {
+  $('#cad-total').textContent = 'Carregando...';
+  try { FUNCOES = (await api('adminFuncoes')).lista; renderFuncoes(); }
+  catch (err) { $('#cad-total').textContent = err.message; }
+}
+
+function funcoesFiltradas() {
+  const q = semAcento($('#cad-busca').value.trim());
+  const cat = $('#cad-filtro').value;
+  return FUNCOES.filter(f => (!cat || f.categoria === cat) &&
+    (!q || semAcento([f.nome, f.cpf, f.categoria, f.atividade].join(' ')).includes(q)));
+}
+
+function renderFuncoes() {
+  const lista = funcoesFiltradas();
+  $('#cad-total').textContent = lista.length + ' de ' + FUNCOES.length + ' cadastro(s)';
+  $('#cad-tabela').innerHTML = '<thead><tr><th>Nome</th><th>CPF</th><th>Categoria</th><th>Título</th><th>Horas</th><th>Ações</th></tr></thead><tbody>' +
+    (lista.map(f => `<tr><td>${esc(f.nome)}</td><td>${esc(f.cpf)}</td><td>${esc(f.categoria)}</td><td>${esc(f.atividade)}</td><td>${esc(f.ch)}</td>
+      <td><div class="acoes-linha">
+        <button class="btn claro" type="button" data-ver="${esc(f.id)}">QR</button>
+        <button class="btn" type="button" data-cert-id="${esc(f.id)}">Certificado</button>
+        <button class="btn perigo" type="button" data-remover="${esc(f.id)}" aria-label="Remover">✕</button>
+      </div></td></tr>`).join('') || '<tr><td colspan="6">Nenhum cadastro.</td></tr>') + '</tbody>';
+}
+
+$('#cad-busca').addEventListener('input', renderFuncoes);
+$('#cad-filtro').addEventListener('change', renderFuncoes);
+$('#cad-atualizar').addEventListener('click', carregarFuncoes);
+$('#cad-csv').addEventListener('click', () => {
+  const cel = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const linhas = [['Nome', 'CPF', 'Categoria', 'Titulo', 'CargaHoraria', 'Cadastro']]
+    .concat(funcoesFiltradas().map(f => [f.nome, f.cpf, f.categoria, f.atividade, f.ch, f.data]));
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['﻿' + linhas.map(l => l.map(cel).join(';')).join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+  a.download = 'coines2027-cadastros.csv';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+});
+
+document.addEventListener('click', async e => {
+  const cert = e.target.closest('[data-cert-id]');
+  if (cert) {
+    const rot = cert.textContent;
+    cert.disabled = true; cert.textContent = 'Gerando...';
+    try { const j = await api('adminCertificado', { id: cert.dataset.certId }); await gerarPdf(j.cert); }
+    catch (err) { alert(err.message); }
+    finally { cert.disabled = false; cert.textContent = rot; }
+    return;
+  }
+  const ver = e.target.closest('[data-ver]');
+  if (ver) {
+    const f = FUNCOES.find(x => x.id === ver.dataset.ver);
+    if (f) mostrarCadastrado(f, '');
+    $('#cad-resultado').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    return;
+  }
+  const rem = e.target.closest('[data-remover]');
+  if (rem) {
+    const f = FUNCOES.find(x => x.id === rem.dataset.remover);
+    if (!f || !confirm('Remover ' + f.nome + ' da categoria ' + f.categoria + '? O certificado dessa categoria deixa de existir.')) return;
+    try { const j = await api('adminRemoverFuncao', { id: f.id }); carregarFuncoes(); if (ultimoCad && ultimoCad.id === f.id) $('#cad-resultado').innerHTML = `<div class="cad-vazio"><p>${esc(j.mensagem)}</p></div>`; }
+    catch (err) { alert(err.message); }
+  }
+});
+
 // ---------- Sorteio ----------
 let RES = null;
 
@@ -470,6 +704,7 @@ function renderResumo(r) {
     n(r.aguardando, 'aguardando resposta', 'amarelo') +
     n(r.espera, 'na lista de espera', 'laranja') +
     n(r.recusaram, 'recusaram') +
+    (r.organizacao ? n(r.organizacao, 'da organização (fora das vagas)') : '') +
     n(r.expirados, 'não responderam no prazo') +
     n(r.vagasLivres + ' / ' + r.vagas, 'vagas livres');
 

@@ -22,6 +22,7 @@
       <option value="Espera">8. Lista de espera</option>
       <option value="Recusou">9. Recusou a vaga</option>
       <option value="Expirado">10. Prazo encerrado</option>
+      <option value="Org">11. Palestrante (cadastro da organização)</option>
     </select>
   </label>
   <label id="t-freq-rot">Frequência
@@ -43,15 +44,19 @@
     { id: 'MC02', titulo: 'Literatura surda', data: '2027-09-23', dataBr: '23/09/2027', inicio: '14:00', fim: '17:00', local: 'Sala 2', ch: '3', ministrante: 'Prof. Carlos Souza' },
     { id: 'MC03', titulo: 'Tecnologia e acessibilidade', data: '2027-09-24', dataBr: '24/09/2027', inicio: '09:00', fim: '12:00', local: 'Auditório', ch: '3', ministrante: 'Prof. Bruno Reis' }
   ];
+  const FUNCOES = [
+    { id: 'F1', categoria: 'Palestrante', atividade: 'Libras e tecnologia na educação', ch: '4' },
+    { id: 'F2', categoria: 'Mediador', atividade: 'Educação bilíngue', ch: '' }
+  ];
   const M = window.MOCK = { estado: 'SorteadoPrazo', dias: 0, minicursos: [], nome: 'Maria Silva Souza' };
 
   function situacao() {
     const e = M.estado;
-    const s = { status: e === 'SorteadoPrazo' ? 'Sorteado' : e, prazo: '28/07/2027 às 23:59', podeResponder: false, posicao: 0 };
+    const s = { status: e === 'SorteadoPrazo' ? 'Sorteado' : (e === 'Org' ? 'Confirmado' : e), prazo: '28/07/2027 às 23:59', podeResponder: false, posicao: 0 };
     if (e === 'Inscrito') { s.titulo = 'Inscrição recebida'; s.texto = 'Aguarde o sorteio das 500 vagas presenciais. O resultado chega por e-mail.'; }
     else if (e === 'Sorteado') { s.podeResponder = true; s.titulo = 'Você foi sorteado(a)!'; s.texto = 'Em breve você vai receber por e-mail o pedido de confirmação. Se já sabe, pode responder agora.'; }
     else if (e === 'SorteadoPrazo') { s.podeResponder = true; s.titulo = 'Confirme sua presença'; s.texto = 'Você tem uma vaga no COINES 2027. Responda até ' + s.prazo + '. Se não responder, a vaga passa para a lista de espera.'; }
-    else if (e === 'Confirmado') { s.podeResponder = true; s.titulo = 'Presença confirmada'; s.texto = 'Sua vaga presencial está garantida. Mostre o QR Code presencial na entrada do evento.'; }
+    else if (e === 'Confirmado' || e === 'Org') { s.podeResponder = true; s.titulo = 'Presença confirmada'; s.texto = 'Sua vaga presencial está garantida. Mostre o QR Code presencial na entrada do evento.'; }
     else if (e === 'Espera') { s.posicao = 37; s.titulo = 'Lista de espera: posição 37'; s.texto = 'Se abrir uma vaga, você recebe um e-mail para confirmar. Confira também a caixa de spam.'; }
     else if (e === 'Recusou') { s.titulo = 'Você liberou sua vaga'; s.texto = 'Obrigado por avisar. A vaga foi passada para a próxima pessoa da lista de espera.'; }
     else if (e === 'Expirado') { s.titulo = 'Prazo de confirmação encerrado'; s.texto = 'Não recebemos sua resposta no prazo, e a vaga passou para a lista de espera.'; }
@@ -65,7 +70,8 @@
       cpf: '***.982.247-**', evento: 'COINES 2027', frequencia: freq, diasPresentes: M.dias, totalDias: DIAS,
       freqMinima: MIN, certEvento: freq >= MIN, kitRecebido: false,
       qrPresencial: 'COINES27|P|TESTE12345', qrLanche: 'COINES27|L|TESTE12345',
-      minicursos: M.minicursos.map(m => Object.assign({ registradoEm: '22/09/2027 09:12:00' }, m))
+      minicursos: M.minicursos.map(m => Object.assign({ registradoEm: '22/09/2027 09:12:00' }, m)),
+      funcoes: M.estado === 'Org' ? FUNCOES : []
     };
   }
 
@@ -92,6 +98,11 @@
     }
     if (a === 'certificado') {
       const nome = M.nome.toUpperCase();
+      if (req.tipo === 'funcao') {
+        const f = FUNCOES.find(x => x.id === req.id) || FUNCOES[0];
+        const frase = f.categoria === 'Palestrante' ? 'proferiu a palestra "' + f.atividade + '" no' : 'atuou como mediador(a) da mesa "' + f.atividade + '" no';
+        return { ok: true, cert: cert('Certificamos que ' + nome + ', CPF 529.982.247-25, ' + frase + ' COINES 2027, promovido pelo Instituto Nacional de Educação de Surdos (INES), realizado de 22 a 24 de setembro de 2027' + (f.ch ? ', com carga horária de ' + f.ch + ' horas' : '') + '.', 'certificado-' + f.categoria.toLowerCase() + '.pdf') };
+      }
       if (req.tipo === 'evento') {
         const f = Math.round(M.dias / DIAS * 100);
         if (f < MIN) return { ok: false, erro: 'O certificado do evento exige ' + MIN + '% de frequência. A sua está em ' + f + '%.' };
@@ -113,8 +124,9 @@
   function sincronizar() {
     const sel = document.getElementById('t-estado');
     if (sel && M.estado !== 'cpf') sel.value = M.estado;
-    document.getElementById('t-freq-rot').hidden = M.estado !== 'Confirmado';
-    document.getElementById('t-mc').hidden = M.estado !== 'Confirmado';
+    const conf = M.estado === 'Confirmado' || M.estado === 'Org';
+    document.getElementById('t-freq-rot').hidden = !conf;
+    document.getElementById('t-mc').hidden = !conf;
   }
 
   function aplicar() {
@@ -139,9 +151,9 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('t-estado').addEventListener('change', aplicar);
-    document.getElementById('t-freq').addEventListener('change', e => { M.dias = Number(e.target.value); if (M.estado === 'Confirmado') entrar(painel()); });
+    document.getElementById('t-freq').addEventListener('change', e => { M.dias = Number(e.target.value); if (M.estado === 'Confirmado' || M.estado === 'Org') entrar(painel()); });
     document.getElementById('t-mc').addEventListener('click', () => {
-      if (M.estado !== 'Confirmado') return;
+      if (M.estado !== 'Confirmado' && M.estado !== 'Org') return;
       processando = false;
       $('#scan-area').hidden = true; $('#scan-resultado').hidden = false;
       abrirModal('modal-scan');

@@ -48,6 +48,16 @@ Depois do sorteio, presença, kit, lanche e minicurso só são aceitos para quem
 
 **Para testar:** a função `desfazerSorteio` (rodar pelo editor) volta todo mundo para `Inscrito`. Não use depois dos e-mails reais.
 
+## 6. Cadastro pela organização (categorias)
+No admin, aba **👤 Cadastrar**: CPF, nome, e-mail (opcional), categoria, título (opcional) e carga horária (opcional).
+A pessoa fica `Confirmado` na hora, sem sorteio, e **não ocupa as vagas do sorteio**. Recebe o QR Code do evento e um certificado com o texto da categoria.
+A mesma pessoa pode ter várias categorias (ex.: Palestrante e Mediador): cada uma gera um certificado. Ficam na aba `Funcoes`.
+Categorias e textos dos certificados: lista `CATEGORIAS` no início do `Code.gs`.
+
+## 7. Teste visual
+`teste.html` mostra todas as telas do participante com dados de exemplo (nada é salvo).
+Depois de mudar o `index.html`, gere de novo: `python3 ferramentas/gerar_teste.py index.html ferramentas/teste_extra.html teste.html`.
+
 ## Como funciona
 | QR | Conteúdo | Onde é lido |
 |---|---|---|
@@ -57,6 +67,6 @@ Depois do sorteio, presença, kit, lanche e minicurso só são aceitos para quem
 
 - **Frequência** = dias com presença ÷ dias do evento. Com 3 dias e mínimo de 75%, é preciso estar nos 3 dias. Com 67% bastam 2.
 - **Certificado do evento** libera ao atingir a frequência mínima. **Certificado de minicurso** libera com a presença registrada. O PDF é gerado no navegador.
-- Fundo personalizado do certificado: salve uma imagem A4 paisagem como `certificado-fundo.png` ao lado do `index.html` e preencha `CERT_FUNDO`.
+- Fundo personalizado do certificado: salve uma imagem A4 paisagem como `certificado-fundo.png` ao lado do `index.html` e preencha `CERT_FUNDO` no arquivo `certificado.js` (vale para o site e para o admin).
 - O QR usa um código aleatório, não o CPF.
 - Se o QR não ler, a equipe pode digitar o CPF ou o código no admin.
