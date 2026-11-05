@@ -1,0 +1,155 @@
+<style>
+.barra-teste{position:sticky;top:0;z-index:70;background:#1A2233;color:#fff;padding:10px 16px;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;font-size:15px}
+.barra-teste strong{color:#F5B700;letter-spacing:.5px}
+.barra-teste span{opacity:.8}
+.barra-teste select,.barra-teste button{font:inherit;font-size:15px;padding:8px 10px;border-radius:10px;border:0;width:auto}
+.barra-teste select{background:#fff;color:#1A2233;max-width:100%}
+.barra-teste button{background:#F5B700;color:#1A2233;font-weight:700;cursor:pointer}
+.barra-teste label{display:flex;align-items:center;gap:6px;margin:0;font-weight:400;font-size:15px}
+@media (max-width:520px){.barra-teste span.dica-teste{display:none}.barra-teste label{flex:1 1 100%}.barra-teste select{flex:1}}
+</style>
+<div class="barra-teste" role="region" aria-label="Modo teste">
+  <strong>MODO TESTE</strong><span class="dica-teste">Dados de exemplo, nada é salvo.</span>
+  <label>Tela
+    <select id="t-estado">
+      <option value="cpf">1. Digitar CPF</option>
+      <option value="cadastro">2. Cadastro</option>
+      <option value="Inscrito">3. Aguardando sorteio</option>
+      <option value="Sorteado">4. Sorteado (sem prazo ainda)</option>
+      <option value="SorteadoPrazo" selected>5. Confirmar presença (com prazo)</option>
+      <option value="link">6. Link do e-mail (Sim / Não)</option>
+      <option value="Confirmado">7. Confirmado (QR Codes)</option>
+      <option value="Espera">8. Lista de espera</option>
+      <option value="Recusou">9. Recusou a vaga</option>
+      <option value="Expirado">10. Prazo encerrado</option>
+    </select>
+  </label>
+  <label id="t-freq-rot">Frequência
+    <select id="t-freq">
+      <option value="0">0 dias (0%)</option>
+      <option value="1">1 dia (33%)</option>
+      <option value="2">2 dias (67%)</option>
+      <option value="3">3 dias (100%)</option>
+    </select>
+  </label>
+  <button type="button" id="t-mc">Simular QR do minicurso</button>
+</div>
+<script>
+// ======== MODO TESTE: substitui a API por dados de exemplo ========
+(function () {
+  const DIAS = 3, MIN = 75;
+  const MINICURSOS = [
+    { id: 'MC01', titulo: 'Introdução à Libras', data: '2027-09-22', dataBr: '22/09/2027', inicio: '09:00', fim: '12:00', local: 'Sala 1', ch: '3', ministrante: 'Profa. Ana Lima' },
+    { id: 'MC02', titulo: 'Literatura surda', data: '2027-09-23', dataBr: '23/09/2027', inicio: '14:00', fim: '17:00', local: 'Sala 2', ch: '3', ministrante: 'Prof. Carlos Souza' },
+    { id: 'MC03', titulo: 'Tecnologia e acessibilidade', data: '2027-09-24', dataBr: '24/09/2027', inicio: '09:00', fim: '12:00', local: 'Auditório', ch: '3', ministrante: 'Prof. Bruno Reis' }
+  ];
+  const M = window.MOCK = { estado: 'SorteadoPrazo', dias: 0, minicursos: [], nome: 'Maria Silva Souza' };
+
+  function situacao() {
+    const e = M.estado;
+    const s = { status: e === 'SorteadoPrazo' ? 'Sorteado' : e, prazo: '28/07/2027 às 23:59', podeResponder: false, posicao: 0 };
+    if (e === 'Inscrito') { s.titulo = 'Inscrição recebida'; s.texto = 'Aguarde o sorteio das 500 vagas presenciais. O resultado chega por e-mail.'; }
+    else if (e === 'Sorteado') { s.podeResponder = true; s.titulo = 'Você foi sorteado(a)!'; s.texto = 'Em breve você vai receber por e-mail o pedido de confirmação. Se já sabe, pode responder agora.'; }
+    else if (e === 'SorteadoPrazo') { s.podeResponder = true; s.titulo = 'Confirme sua presença'; s.texto = 'Você tem uma vaga no COINES 2027. Responda até ' + s.prazo + '. Se não responder, a vaga passa para a lista de espera.'; }
+    else if (e === 'Confirmado') { s.podeResponder = true; s.titulo = 'Presença confirmada'; s.texto = 'Sua vaga presencial está garantida. Mostre o QR Code presencial na entrada do evento.'; }
+    else if (e === 'Espera') { s.posicao = 37; s.titulo = 'Lista de espera: posição 37'; s.texto = 'Se abrir uma vaga, você recebe um e-mail para confirmar. Confira também a caixa de spam.'; }
+    else if (e === 'Recusou') { s.titulo = 'Você liberou sua vaga'; s.texto = 'Obrigado por avisar. A vaga foi passada para a próxima pessoa da lista de espera.'; }
+    else if (e === 'Expirado') { s.titulo = 'Prazo de confirmação encerrado'; s.texto = 'Não recebemos sua resposta no prazo, e a vaga passou para a lista de espera.'; }
+    return s;
+  }
+
+  function painel() {
+    const freq = Math.round(M.dias / DIAS * 100);
+    return {
+      situacao: situacao(), codigo: 'TESTE12345', nome: M.nome, primeiroNome: M.nome.split(' ')[0],
+      cpf: '***.982.247-**', evento: 'COINES 2027', frequencia: freq, diasPresentes: M.dias, totalDias: DIAS,
+      freqMinima: MIN, certEvento: freq >= MIN, kitRecebido: false,
+      qrPresencial: 'COINES27|P|TESTE12345', qrLanche: 'COINES27|L|TESTE12345',
+      minicursos: M.minicursos.map(m => Object.assign({ registradoEm: '22/09/2027 09:12:00' }, m))
+    };
+  }
+
+  function cert(texto, arquivo) {
+    return { titulo: 'CERTIFICADO', evento: 'COINES 2027', texto: texto, localData: 'Rio de Janeiro, 24 de setembro de 2027.',
+      assinatura: 'Coordenação do COINES 2027', codigoValidacao: 'TESTE0000000', arquivo: arquivo };
+  }
+
+  function responder(req) {
+    const a = req.acao;
+    if (a === 'buscarCpf') return { ok: true, existe: false };
+    if (a === 'inscrever') { M.nome = (req.dados && req.dados.nome) || M.nome; M.estado = 'Inscrito'; sincronizar(); return { ok: true, painel: painel() }; }
+    if (a === 'painel') return { ok: true, painel: painel() };
+    if (a === 'responder') {
+      if (req.resposta === 'sim') { M.estado = 'Confirmado'; sincronizar(); return { ok: true, mensagem: 'Nos vemos no COINES 2027! Seu QR Code de entrada está na sua inscrição.', painel: painel() }; }
+      M.estado = 'Recusou'; sincronizar();
+      return { ok: true, mensagem: 'Tudo certo, sua vaga foi liberada para a lista de espera. Obrigado por avisar.', painel: painel() };
+    }
+    if (a === 'registrarMinicurso') {
+      const prox = MINICURSOS.find(m => !M.minicursos.some(x => x.id === m.id));
+      if (!prox) return { ok: true, jaRegistrado: true, minicurso: MINICURSOS[0].titulo, minicursos: painel().minicursos };
+      M.minicursos.push(prox);
+      return { ok: true, jaRegistrado: false, minicurso: prox.titulo, minicursos: painel().minicursos };
+    }
+    if (a === 'certificado') {
+      const nome = M.nome.toUpperCase();
+      if (req.tipo === 'evento') {
+        const f = Math.round(M.dias / DIAS * 100);
+        if (f < MIN) return { ok: false, erro: 'O certificado do evento exige ' + MIN + '% de frequência. A sua está em ' + f + '%.' };
+        return { ok: true, cert: cert('Certificamos que ' + nome + ', CPF 529.982.247-25, participou do COINES 2027, promovido pelo Instituto Nacional de Educação de Surdos (INES), realizado de 22 a 24 de setembro de 2027, com frequência de ' + f + '% e carga horária total de 24 horas.', 'certificado-teste.pdf') };
+      }
+      const mc = MINICURSOS.find(m => m.id === req.id) || MINICURSOS[0];
+      return { ok: true, cert: cert('Certificamos que ' + nome + ', CPF 529.982.247-25, participou do minicurso "' + mc.titulo + '", ministrado por ' + mc.ministrante + ', realizado em ' + mc.dataBr + ' durante o COINES 2027, promovido pelo Instituto Nacional de Educação de Surdos (INES), com carga horária de ' + mc.ch + ' horas.', 'certificado-minicurso-teste.pdf') };
+    }
+    return { ok: false, erro: 'Ação não simulada no modo teste.' };
+  }
+
+  const fetchOriginal = window.fetch.bind(window);
+  window.fetch = function (url, opcoes) {
+    if (String(url).indexOf('script.google.com') < 0) return fetchOriginal(url, opcoes);
+    const req = JSON.parse((opcoes && opcoes.body) || '{}');
+    return new Promise(ok => setTimeout(() => ok(new Response(JSON.stringify(responder(req)), { headers: { 'Content-Type': 'application/json' } })), 350));
+  };
+
+  function sincronizar() {
+    const sel = document.getElementById('t-estado');
+    if (sel && M.estado !== 'cpf') sel.value = M.estado;
+    document.getElementById('t-freq-rot').hidden = M.estado !== 'Confirmado';
+    document.getElementById('t-mc').hidden = M.estado !== 'Confirmado';
+  }
+
+  function aplicar() {
+    const v = document.getElementById('t-estado').value;
+    if (typeof fecharModais === 'function') fecharModais();
+    if (v === 'cpf') { M.estado = 'cpf'; mostrar('tela-cpf'); sincronizar(); return; }
+    if (v === 'cadastro') {
+      M.estado = 'cadastro'; $('#c-cpf').value = '529.982.247-25'; mostrar('tela-cadastro'); sincronizar(); return;
+    }
+    if (v === 'link') {
+      M.estado = 'SorteadoPrazo';
+      $('#resp-pergunta').hidden = false; $('#resp-final').hidden = true; $('#erro-resposta').textContent = '';
+      mostrar('tela-resposta');
+      document.querySelectorAll('[data-link]').forEach(b => b.classList.toggle('destaque', b.dataset.link === 'sim'));
+      document.getElementById('t-freq-rot').hidden = true; document.getElementById('t-mc').hidden = true;
+      return;
+    }
+    M.estado = v;
+    sincronizar();
+    entrar(painel());
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('t-estado').addEventListener('change', aplicar);
+    document.getElementById('t-freq').addEventListener('change', e => { M.dias = Number(e.target.value); if (M.estado === 'Confirmado') entrar(painel()); });
+    document.getElementById('t-mc').addEventListener('click', () => {
+      if (M.estado !== 'Confirmado') return;
+      processando = false;
+      $('#scan-area').hidden = true; $('#scan-resultado').hidden = false;
+      abrirModal('modal-scan');
+      aoLerMinicurso('COINES27|M|SIMULADO');
+    });
+    // O botão Sair volta para a tela do CPF
+    document.getElementById('btn-sair').addEventListener('click', () => { M.estado = 'cpf'; document.getElementById('t-estado').value = 'cpf'; sincronizar(); });
+    setTimeout(aplicar, 0);
+  });
+})();
+</script>
