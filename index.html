@@ -10,6 +10,7 @@
 <style>
 :root{--azul:#0B3D91;--azul-esc:#072A66;--amarelo:#F5B700;--laranja:#E07A10;--verde:#1F9D55;--vermelho:#C62828;--fundo:#F2F5FB;--cartao:#fff;--texto:#1A2233;--suave:#5B6478;--borda:#DDE3EE;--raio:18px}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;font-family:'Atkinson Hyperlegible',system-ui,sans-serif;background:var(--fundo);color:var(--texto);font-size:17px;line-height:1.45}
 .topo{background:linear-gradient(135deg,var(--azul),var(--azul-esc));color:#fff;padding:22px 16px 60px;text-align:center}
 .marca{font-weight:700;font-size:30px;letter-spacing:.5px;margin:0}
@@ -96,6 +97,24 @@ input[readonly]{background:#F0F2F7;color:var(--suave)}
 @keyframes gira{to{transform:rotate(360deg)}}
 .aviso{position:fixed;left:50%;bottom:24px;transform:translate(-50%,140px);background:var(--texto);color:#fff;padding:12px 18px;border-radius:12px;transition:transform .3s;z-index:90;max-width:calc(100% - 32px);text-align:center}
 .aviso.mostra{transform:translate(-50%,0)}
+/* Situação da inscrição */
+.situacao{display:flex;gap:16px;align-items:flex-start;margin-bottom:16px;border-left:8px solid var(--azul)}
+.situacao .ic-sit{font-size:40px;line-height:1;flex:none}
+.situacao h2{font-size:22px;margin-bottom:6px}
+.situacao p{margin:0;color:var(--suave)}
+.situacao[data-status="Sorteado"]{border-left-color:var(--amarelo);background:#FFFBEA}
+.situacao[data-status="Confirmado"]{border-left-color:var(--verde);background:#EFFAF3}
+.situacao[data-status="Espera"]{border-left-color:var(--laranja)}
+.situacao[data-status="Recusou"],.situacao[data-status="Expirado"]{border-left-color:var(--suave);background:#F6F8FC}
+.resp-botoes{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.btn.sim{background:var(--verde);color:#fff}
+.btn.nao{background:#fff;color:var(--vermelho);border:2px solid var(--vermelho)}
+.btn.sim.destaque,.btn.nao.destaque{box-shadow:0 0 0 4px rgba(11,61,145,.25)}
+.btn.nao.destaque{background:var(--vermelho);color:#fff}
+.cancelar{margin-top:12px;font-size:15px}
+.resp-final{text-align:center}
+.resp-final .icone-res{margin-top:0}
+@media (max-width:520px){.resp-botoes{grid-template-columns:1fr}}
 @media (max-width:520px){.duas{grid-template-columns:1fr}.ola h1{font-size:24px}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -126,7 +145,7 @@ input[readonly]{background:#F0F2F7;color:var(--suave)}
   <section id="tela-cadastro" class="tela">
     <div class="cartao estreito">
       <h1>Fazer inscrição</h1>
-      <p class="sub">CPF não encontrado. Preencha seus dados para se inscrever.</p>
+      <p class="sub">CPF não encontrado. Preencha seus dados para se inscrever. As 500 vagas presenciais serão sorteadas entre os inscritos, e o resultado chega por e-mail.</p>
       <form id="form-cadastro" novalidate>
         <label for="c-cpf">CPF</label>
         <input id="c-cpf" readonly>
@@ -181,6 +200,27 @@ input[readonly]{background:#F0F2F7;color:var(--suave)}
     </div>
   </section>
 
+  <!-- Resposta pelo link do e-mail -->
+  <section id="tela-resposta" class="tela">
+    <div class="cartao estreito">
+      <div id="resp-pergunta">
+        <h1>Confirmação de presença</h1>
+        <p class="sub">Você vai participar do COINES 2027 presencial?</p>
+        <div class="resp-botoes">
+          <button class="btn sim" type="button" data-link="sim">✅ Sim, vou</button>
+          <button class="btn nao" type="button" data-link="nao">❌ Não vou poder ir</button>
+        </div>
+        <p class="erro" id="erro-resposta" role="alert"></p>
+      </div>
+      <div id="resp-final" class="resp-final" hidden>
+        <div class="icone-res" id="resp-icone">✓</div>
+        <h1 id="resp-titulo"></h1>
+        <p class="sub" id="resp-texto"></p>
+        <button class="btn primario" type="button" id="btn-ir-painel">Ver minha inscrição</button>
+      </div>
+    </div>
+  </section>
+
   <!-- 3. Painel -->
   <section id="tela-painel" class="tela">
     <div class="cartao ola">
@@ -191,7 +231,20 @@ input[readonly]{background:#F0F2F7;color:var(--suave)}
       <button class="btn fantasma" id="btn-sair" type="button">Sair</button>
     </div>
 
-    <div class="grade">
+    <article class="cartao situacao" id="situacao" aria-live="polite">
+      <div class="ic-sit" id="sit-icone">⏳</div>
+      <div style="flex:1">
+        <h2 id="sit-titulo"></h2>
+        <p id="sit-texto"></p>
+        <div class="resp-botoes" id="sit-botoes" hidden>
+          <button class="btn sim" type="button" data-responder="sim">✅ Sim, vou ao evento presencial</button>
+          <button class="btn nao" type="button" data-responder="nao">❌ Não vou poder ir</button>
+        </div>
+        <button class="link cancelar" type="button" id="sit-cancelar" data-responder="nao" hidden>Não vou mais poder ir. Liberar minha vaga.</button>
+      </div>
+    </article>
+
+    <div class="grade" id="area-evento">
       <article class="cartao largo">
         <h2>Frequência no evento</h2>
         <div class="carregador" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="freq-progresso">
@@ -389,7 +442,7 @@ $('#form-cadastro').addEventListener('submit', async e => {
   try {
     const j = await api('inscrever', { dados });
     entrar(j.painel);
-    aviso(j.jaInscrito ? 'Você já estava inscrito(a).' : 'Inscrição confirmada!');
+    aviso(j.jaInscrito ? 'Você já estava inscrito(a).' : 'Inscrição recebida!');
   } catch (err) { erro.textContent = err.message; }
 });
 
@@ -407,9 +460,36 @@ $('#btn-sair').addEventListener('click', () => {
   mostrar('tela-cpf');
 });
 
+const ICONES_SIT = { Inscrito: '⏳', Sorteado: '🎉', Confirmado: '✅', Espera: '🕒', Recusou: '👋', Expirado: '⌛' };
+
+function renderSituacao() {
+  const s = P.situacao || {};
+  $('#situacao').dataset.status = s.status || '';
+  $('#sit-icone').textContent = ICONES_SIT[s.status] || '⏳';
+  $('#sit-titulo').textContent = s.titulo || '';
+  $('#sit-texto').textContent = s.texto || '';
+  $('#sit-botoes').hidden = s.status !== 'Sorteado';
+  $('#sit-cancelar').hidden = s.status !== 'Confirmado';
+  // QR Codes, frequência, minicursos e certificados só para quem confirmou a vaga presencial.
+  $('#area-evento').hidden = s.status !== 'Confirmado';
+}
+
+const AVISO_LIBERAR = 'Tem certeza? Sua vaga vai para a próxima pessoa da lista de espera e não poderá ser recuperada.';
+
+async function responderPainel(resposta) {
+  if (resposta === 'nao' && !confirm(AVISO_LIBERAR)) return;
+  try {
+    const j = await api('responder', { codigo: P.codigo, resposta });
+    P = j.painel;
+    renderPainel();
+    aviso(j.mensagem);
+  } catch (err) { aviso(err.message); }
+}
+
 function renderPainel() {
   $('#ola-nome').textContent = 'Olá, ' + P.primeiroNome + '!';
   $('#ola-cpf').textContent = P.nome + ' · CPF ' + P.cpf;
+  renderSituacao();
   animarFrequencia(P.frequencia);
   desenharQr($('#qr-presencial'), P.qrPresencial, 220);
   desenharQr($('#qr-lanche'), P.qrLanche, 220);
@@ -487,6 +567,8 @@ document.addEventListener('click', e => {
       a.click();
     }
   }
+  const resp = e.target.closest('[data-responder]');
+  if (resp) responderPainel(resp.dataset.responder);
   const cert = e.target.closest('[data-cert]');
   if (cert) baixarCertificado(cert.dataset.cert, cert.dataset.id);
   if (e.target.closest('[data-fechar]')) fecharModais();
@@ -597,8 +679,43 @@ async function gerarPdf(c) {
   doc.save(c.arquivo);
 }
 
+// ---------- Resposta pelo link do e-mail (?t=TOKEN&r=sim|nao) ----------
+const PARAMS = new URLSearchParams(location.search);
+const TOKEN = PARAMS.get('t');
+let painelResposta = null;
+
+function prepararResposta() {
+  mostrar('tela-resposta');
+  const sugerida = PARAMS.get('r');
+  document.querySelectorAll('[data-link]').forEach(b => b.classList.toggle('destaque', b.dataset.link === sugerida));
+  // Tira o token da barra de endereço (não fica no histórico nem é compartilhado sem querer).
+  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+}
+
+document.querySelectorAll('[data-link]').forEach(b => b.addEventListener('click', async () => {
+  const resposta = b.dataset.link;
+  if (resposta === 'nao' && !confirm(AVISO_LIBERAR)) return;
+  $('#erro-resposta').textContent = '';
+  try {
+    const j = await api('responder', { token: TOKEN, resposta });
+    painelResposta = j.painel;
+    const st = j.painel.situacao.status;
+    const icone = $('#resp-icone');
+    icone.className = 'icone-res ' + (st === 'Confirmado' ? 'ok' : 'falha');
+    icone.textContent = st === 'Confirmado' ? '✓' : (st === 'Recusou' ? '👋' : '!');
+    icone.style.background = st === 'Recusou' ? 'var(--suave)' : '';
+    $('#resp-titulo').textContent = st === 'Confirmado' ? 'Presença confirmada!' : j.painel.situacao.titulo;
+    $('#resp-texto').textContent = j.mensagem;
+    $('#resp-pergunta').hidden = true;
+    $('#resp-final').hidden = false;
+  } catch (err) { $('#erro-resposta').textContent = err.message; }
+}));
+
+$('#btn-ir-painel').addEventListener('click', () => { if (painelResposta) entrar(painelResposta); });
+
 // ---------- Início ----------
 (async function iniciar() {
+  if (TOKEN) { prepararResposta(); return; }
   const codigo = guarda.get(CHAVE);
   if (!codigo) return;
   try { const j = await api('painel', { codigo }); entrar(j.painel); }

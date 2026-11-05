@@ -40,6 +40,23 @@ input:focus,select:focus{outline:none;border-color:var(--azul);box-shadow:0 0 0 
 .abas [data-modo="kit"][aria-selected="true"]{background:#6B3FA0}
 .abas [data-modo="lanche"][aria-selected="true"]{background:#D9730D}
 .abas [data-modo="tabelas"][aria-selected="true"]{background:var(--texto)}
+.abas [data-modo="sorteio"][aria-selected="true"]{background:#1F7A6B}
+/* Sorteio */
+.numeros{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:16px}
+.num{background:#fff;border:1px solid var(--borda);border-radius:14px;padding:14px}
+.num strong{display:block;font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums}
+.num span{font-size:14px;color:var(--suave)}
+.num.verde strong{color:var(--verde)}.num.amarelo strong{color:#B07D00}.num.laranja strong{color:#D9730D}.num.azul strong{color:var(--azul)}
+.etapas{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+.etapa{display:flex;flex-direction:column;gap:8px}
+.etapa h2{display:flex;align-items:center;gap:10px}
+.passo{width:30px;height:30px;border-radius:50%;background:#1F7A6B;color:#fff;display:grid;place-items:center;font-size:16px;flex:none}
+.etapa p{margin:0;color:var(--suave);font-size:15px}
+.etapa .btn{margin-top:auto}
+.etapa .btn:disabled{opacity:.45;cursor:not-allowed}
+.etapa label{margin:4px 0 0}
+.msg-sorteio{margin:14px 0 0;padding:12px 14px;border-radius:12px;background:#E6F6EC;color:#14532D;font-weight:700}
+.msg-sorteio.erro{background:#FDE8E8;color:var(--vermelho)}
 /* Scanner */
 .scan{display:grid;gap:16px;grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
 .faixa{background:var(--modo);color:#fff;border-radius:14px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px}
@@ -115,8 +132,38 @@ td .btn{padding:6px 12px;font-size:14px}
       <button role="tab" data-modo="presenca" aria-selected="true">📍 Presença</button>
       <button role="tab" data-modo="kit" aria-selected="false">🎒 Kit material</button>
       <button role="tab" data-modo="lanche" aria-selected="false">🥪 Lanche</button>
+      <button role="tab" data-modo="sorteio" aria-selected="false">🎲 Sorteio</button>
       <button role="tab" data-modo="tabelas" aria-selected="false">📋 Tabelas</button>
     </nav>
+
+    <div id="painel-sorteio" class="oculto">
+      <div class="numeros" id="numeros"></div>
+      <div class="etapas">
+        <article class="cartao etapa">
+          <h2><span class="passo">1</span>Sorteio das vagas</h2>
+          <p id="et1"></p>
+          <button class="btn" type="button" id="btn-sortear">🎲 Fazer o sorteio</button>
+        </article>
+        <article class="cartao etapa">
+          <h2><span class="passo">2</span>Pedir confirmação</h2>
+          <p id="et2"></p>
+          <label for="dias">Prazo para responder (dias)</label>
+          <input id="dias" type="number" min="1" max="60" inputmode="numeric">
+          <button class="btn" type="button" id="btn-confirmacao">✉️ Enviar pedido de confirmação</button>
+        </article>
+        <article class="cartao etapa">
+          <h2><span class="passo">3</span>Lista de espera</h2>
+          <p id="et3"></p>
+          <button class="btn" type="button" id="btn-chamar">📣 Encerrar prazos e chamar a lista</button>
+        </article>
+        <article class="cartao etapa">
+          <h2><span class="passo">✉</span>E-mails</h2>
+          <p id="et4"></p>
+          <button class="btn claro" type="button" id="btn-emails">Enviar e-mails da fila agora</button>
+        </article>
+      </div>
+      <p class="msg-sorteio oculto" id="msg-sorteio" role="status"></p>
+    </div>
 
     <div id="painel-scan">
       <div class="faixa">
@@ -254,10 +301,12 @@ document.querySelectorAll('.abas button').forEach(b => b.addEventListener('click
 
 function selecionar(m) {
   document.querySelectorAll('.abas button').forEach(b => b.setAttribute('aria-selected', b.dataset.modo === m));
-  const tabelas = m === 'tabelas';
-  $('#painel-scan').classList.toggle('oculto', tabelas);
+  const tabelas = m === 'tabelas', sorteio = m === 'sorteio';
+  $('#painel-scan').classList.toggle('oculto', tabelas || sorteio);
   $('#painel-tabelas').classList.toggle('oculto', !tabelas);
+  $('#painel-sorteio').classList.toggle('oculto', !sorteio);
   if (tabelas) { pararCamera(); carregarTabela(); return; }
+  if (sorteio) { pararCamera(); carregarResumo(); return; }
   modo = m;
   document.body.dataset.modo = m;
   $('#turnos').classList.toggle('oculto', m !== 'lanche');
@@ -395,6 +444,93 @@ function bip(status) {
   else if (status === 'repetido') { tom(600, 0, 0.12); tom(600, 0.18, 0.12); if (navigator.vibrate) navigator.vibrate([60, 60, 60]); }
   else { tom(220, 0, 0.45); if (navigator.vibrate) navigator.vibrate(400); }
 }
+
+// ---------- Sorteio ----------
+let RES = null;
+
+async function carregarResumo() {
+  try { const j = await api('adminResumo'); renderResumo(j.resumo); }
+  catch (err) { msgSorteio(err.message, true); }
+}
+
+function msgSorteio(txt, erro) {
+  const m = $('#msg-sorteio');
+  m.textContent = txt;
+  m.classList.toggle('erro', !!erro);
+  m.classList.toggle('oculto', !txt);
+}
+
+function renderResumo(r) {
+  RES = r;
+  const n = (v, rot, cor) => `<div class="num ${cor || ''}"><strong>${v}</strong><span>${rot}</span></div>`;
+  $('#numeros').innerHTML =
+    n(r.total, 'inscritos no total', 'azul') +
+    (r.sorteioEm ? '' : n(r.inscritos, 'aguardando sorteio')) +
+    n(r.confirmados, 'confirmados', 'verde') +
+    n(r.aguardando, 'aguardando resposta', 'amarelo') +
+    n(r.espera, 'na lista de espera', 'laranja') +
+    n(r.recusaram, 'recusaram') +
+    n(r.expirados, 'não responderam no prazo') +
+    n(r.vagasLivres + ' / ' + r.vagas, 'vagas livres');
+
+  const feito = !!r.sorteioEm;
+  $('#et1').textContent = feito
+    ? 'Feito em ' + r.sorteioEm + '. Quem se inscrever agora entra no fim da lista de espera.'
+    : 'Sorteia ' + r.vagas + ' vagas entre os ' + r.inscritos + ' inscritos. O restante vai para a lista de espera, na ordem do sorteio. Todos recebem e-mail com o resultado.';
+  $('#btn-sortear').disabled = feito || !r.inscritos;
+
+  if (!$('#dias').value) $('#dias').value = r.prazoConfirmacaoDias;
+  $('#et2').textContent = !feito
+    ? 'Disponível depois do sorteio.'
+    : r.semPedido
+      ? r.semPedido + ' sorteado(s) ainda não receberam o pedido. O e-mail traz os botões "Sim, vou" e "Não vou poder ir".'
+      : 'Todos os sorteados já receberam o pedido de confirmação.';
+  $('#btn-confirmacao').disabled = !feito || !r.semPedido;
+
+  $('#et3').textContent = !feito
+    ? 'Disponível depois do sorteio.'
+    : (r.vagasLivres + ' vaga(s) livre(s) e ' + r.vencidos + ' prazo(s) vencido(s). ' +
+      'Quem é chamado tem ' + r.prazoChamadaDias + ' dia(s) para responder.' +
+      (r.chamadaAutomatica ? ' Isso também acontece sozinho a cada hora, e na hora quando alguém responde "Não".' : ''));
+  $('#btn-chamar').disabled = !feito;
+
+  $('#et4').textContent = r.emailsPendentes + ' na fila, ' + r.emailsEnviados + ' enviado(s)' +
+    (r.emailsErro ? ', ' + r.emailsErro + ' com erro' : '') + '. ' +
+    (r.cotaEmail === null ? '' : 'Cota restante hoje: ' + r.cotaEmail + '. ') +
+    'A fila também é enviada sozinha a cada hora.';
+  $('#btn-emails').disabled = !r.emailsPendentes;
+}
+
+async function acaoSorteio(botao, acao, pergunta, extra) {
+  if (pergunta && !confirm(pergunta)) return;
+  const botoes = document.querySelectorAll('#painel-sorteio .btn');
+  botoes.forEach(b => { b.disabled = true; });
+  const rotulo = botao.textContent;
+  botao.textContent = 'Processando...';
+  msgSorteio('Processando. Se houver e-mails para enviar, pode levar até 1 minuto.');
+  try {
+    const j = await api(acao, extra);
+    msgSorteio(j.mensagem);
+    renderResumo(j.resumo);
+  } catch (err) {
+    msgSorteio(err.message, true);
+    carregarResumo();
+  } finally {
+    botao.textContent = rotulo;
+  }
+}
+
+$('#btn-sortear').addEventListener('click', e => acaoSorteio(e.currentTarget, 'adminSortear',
+  'Fazer o sorteio agora? Isso não pode ser desfeito: os ' + (RES ? Math.min(RES.inscritos, RES.vagas) : '') +
+  ' sorteados e a lista de espera vão receber e-mail.'));
+$('#btn-confirmacao').addEventListener('click', e => {
+  const dias = Number($('#dias').value) || (RES && RES.prazoConfirmacaoDias);
+  acaoSorteio(e.currentTarget, 'adminPedirConfirmacao',
+    'Enviar o pedido de confirmação com prazo de ' + dias + ' dia(s)?', { dias });
+});
+$('#btn-chamar').addEventListener('click', e => acaoSorteio(e.currentTarget, 'adminChamarEspera',
+  'Encerrar os prazos vencidos e chamar a lista de espera para as vagas livres?'));
+$('#btn-emails').addEventListener('click', e => acaoSorteio(e.currentTarget, 'adminEnviarEmails'));
 
 // ---------- Tabelas ----------
 $('#sel-aba').addEventListener('change', carregarTabela);

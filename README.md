@@ -32,6 +32,22 @@ Use GitHub Pages (ou qualquer hospedagem com HTTPS, obrigatório para a câmera)
 - No admin, aba **Tabelas > Minicursos**, botão **QR** em cada linha: imprima e cole na porta da sala.
 - O participante escaneia esse QR pelo próprio painel. Com `VALIDAR_HORARIO_MINICURSO: true`, só vale no dia e no horário (com tolerância de 30 min). Para testar antes do evento, coloque `false`.
 
+## 5. Sorteio, confirmação e lista de espera
+Fluxo do participante: **inscrição → sorteio → e-mail com o resultado → e-mail pedindo confirmação (Sim / Não) → QR Codes liberados**.
+
+No admin, aba **🎲 Sorteio**:
+1. **Fazer o sorteio**: sorteia as 500 vagas (`VAGAS` no `CONFIG`). O resto vai para a lista de espera, na ordem do sorteio. Só pode ser feito uma vez.
+2. **Pedir confirmação**: manda aos sorteados o e-mail com os botões "Sim, vou" e "Não vou poder ir", com prazo em dias.
+3. **Lista de espera**: quem responde "Não" libera a vaga na hora, e o próximo da lista recebe e-mail. Quem não responde no prazo perde a vaga. Isso roda sozinho de hora em hora, e o botão faz na hora.
+
+Situações na coluna `Status` da aba `Inscritos`: `Inscrito`, `Sorteado`, `Confirmado`, `Recusou`, `Expirado`, `Espera`.
+
+Depois do sorteio, presença, kit, lanche e minicurso só são aceitos para quem está `Confirmado`. O painel do participante só mostra os QR Codes depois da confirmação.
+
+**Cota de e-mails do Google:** conta gmail.com envia cerca de **100 e-mails por dia**; conta Google Workspace (institucional), cerca de **1.500**. Os e-mails ficam na aba `Emails` e saem aos poucos, de hora em hora, respeitando a cota. Com 500 vagas, use de preferência uma conta institucional.
+
+**Para testar:** a função `desfazerSorteio` (rodar pelo editor) volta todo mundo para `Inscrito`. Não use depois dos e-mails reais.
+
 ## Como funciona
 | QR | Conteúdo | Onde é lido |
 |---|---|---|

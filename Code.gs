@@ -21,11 +21,33 @@ const CONFIG = {
   TOLERANCIA_MIN: 30,           // minutos antes do início e depois do fim
   HORA_TARDE: '12:00',          // a partir deste horário o admin sugere o lanche da tarde
   FUSO: 'America/Sao_Paulo',
-  PREFIXO_QR: 'COINES27'
+  PREFIXO_QR: 'COINES27',
+
+  // Sorteio, confirmação e lista de espera
+  VAGAS: 500,                   // vagas presenciais
+  PRAZO_CONFIRMACAO_DIAS: 5,    // prazo sugerido para os sorteados confirmarem
+  PRAZO_CHAMADA_DIAS: 2,        // prazo para quem é chamado da lista de espera
+  CHAMADA_AUTOMATICA: true,     // de hora em hora: encerra prazos vencidos e chama a lista de espera
+  AVISAR_ESPERA: true,          // manda e-mail para quem ficou na lista de espera
+  EXIGIR_CONFIRMACAO: true,     // depois do sorteio, presença, kit, lanche e minicurso só para confirmados
+  SITE_URL: 'https://gabrieldeaf.github.io/coines2027/',
+  REMETENTE: 'COINES 2027',     // nome que aparece como remetente dos e-mails
+  RESPONDER_PARA: ''            // opcional: e-mail para respostas (ex.: coines@ines.gov.br)
+};
+
+const ST = {
+  INSCRITO: 'Inscrito',
+  SORTEADO: 'Sorteado',
+  CONFIRMADO: 'Confirmado',
+  RECUSOU: 'Recusou',
+  EXPIRADO: 'Expirado',
+  ESPERA: 'Espera'
 };
 
 const ABAS = {
-  Inscritos: ['Codigo', 'CPF', 'Nome', 'Email', 'Telefone', 'Instituicao', 'Identidade', 'Atuacao', 'Cidade', 'UF', 'DataInscricao'],
+  Inscritos: ['Codigo', 'CPF', 'Nome', 'Email', 'Telefone', 'Instituicao', 'Identidade', 'Atuacao', 'Cidade', 'UF', 'DataInscricao',
+    'Status', 'Origem', 'PosicaoEspera', 'PrazoConfirmacao', 'Resposta', 'RespostaEm', 'Token'],
+  Emails: ['Criado', 'Tipo', 'Codigo', 'Email', 'Nome', 'Status', 'Enviado', 'Erro'],
   Presenca: ['DataHora', 'Dia', 'Codigo', 'CPF', 'Nome'],
   Kit: ['DataHora', 'Codigo', 'CPF', 'Nome'],
   Lanche: ['DataHora', 'Dia', 'Turno', 'Codigo', 'CPF', 'Nome'],
@@ -39,6 +61,9 @@ function doGet() {
   return saida({ ok: true, evento: CONFIG.EVENTO, mensagem: 'API no ar' });
 }
 
+const props = () => PropertiesService.getScriptProperties();
+const sorteioFeito = () => !!props().getProperty('SORTEIO_EM');
+
 function doPost(e) {
   let req;
   try {
@@ -47,8 +72,9 @@ function doPost(e) {
     return saida({ ok: false, erro: 'Requisição inválida.' });
   }
   const acoes = {
-    buscarCpf, inscrever, painel, registrarMinicurso, certificado,
-    adminLogin, adminScan, adminTabela
+    buscarCpf, inscrever, painel, registrarMinicurso, certificado, responder,
+    adminLogin, adminScan, adminTabela,
+    adminResumo, adminSortear, adminPedirConfirmacao, adminChamarEspera, adminEnviarEmails
   };
   const fn = acoes[req.acao];
   if (!fn) return saida({ ok: false, erro: 'Ação desconhecida.' });
@@ -89,27 +115,64 @@ function aba(nome) {
   return sh;
 }
 
+function cabecalho(sh) {
+  return sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(c => String(c).trim());
+}
+
+// Cada objeto lido traz _linha (número da linha na planilha) para poder ser atualizado depois.
 function ler(nome) {
   const sh = aba(nome);
   const ult = sh.getLastRow();
   if (ult < 2) return [];
-  const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
-  return sh.getRange(2, 1, ult - 1, cab.length).getDisplayValues()
-    .filter(l => l.join('') !== '')
-    .map(l => {
-      const o = {};
-      cab.forEach((c, i) => { o[String(c).trim()] = String(l[i]).trim(); });
-      return o;
-    });
+  const cab = cabecalho(sh);
+  const saidaLinhas = [];
+  sh.getRange(2, 1, ult - 1, cab.length).getDisplayValues().forEach((l, i) => {
+    if (l.join('') === '') return;
+    const o = { _linha: i + 2 };
+    cab.forEach((c, j) => { if (c) o[c] = String(l[j]).trim(); });
+    saidaLinhas.push(o);
+  });
+  return saidaLinhas;
 }
 
+// O apóstrofo força texto: mantém os zeros do CPF e evita fórmulas digitadas.
+const comoTexto = v => (v === undefined || v === null || v === '') ? '' : "'" + v;
+
+// Grava pelo nome da coluna (não pela posição).
 function gravar(nome, obj) {
-  // Grava pelo nome da coluna (não pela posição) e usa apóstrofo para forçar texto:
-  // mantém os zeros do CPF e evita fórmulas digitadas.
+  gravarVarios(nome, [obj]);
+}
+
+function gravarVarios(nome, objs) {
+  if (!objs.length) return;
   const sh = aba(nome);
-  const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0].map(c => String(c).trim());
-  const linha = cab.map(c => (obj[c] === undefined || obj[c] === '') ? '' : "'" + obj[c]);
-  sh.appendRow(linha);
+  const cab = cabecalho(sh);
+  const linhas = objs.map(o => cab.map(c => comoTexto(o[c])));
+  sh.getRange(sh.getLastRow() + 1, 1, linhas.length, cab.length).setValues(linhas);
+}
+
+// alteracoes: [{ _linha: 5, Status: 'Confirmado', ... }]. Atualiza só as colunas informadas.
+function atualizar(nome, alteracoes) {
+  if (!alteracoes.length) return;
+  const sh = aba(nome);
+  const cab = cabecalho(sh);
+  const porColuna = {};
+  alteracoes.forEach(a => Object.keys(a).forEach(k => {
+    if (k === '_linha') return;
+    const col = cab.indexOf(k);
+    if (col < 0) throw new Error('Coluna ' + k + ' não existe na aba ' + nome + '.');
+    (porColuna[col] = porColuna[col] || []).push([a._linha, a[k]]);
+  }));
+  Object.keys(porColuna).forEach(col => {
+    const itens = porColuna[col];
+    const linhas = itens.map(i => i[0]);
+    const ini = Math.min.apply(null, linhas);
+    const fim = Math.max.apply(null, linhas);
+    const rng = sh.getRange(ini, Number(col) + 1, fim - ini + 1, 1);
+    const valores = rng.getValues();
+    itens.forEach(([l, v]) => { valores[l - ini][0] = comoTexto(v); });
+    rng.setValues(valores);
+  });
 }
 
 function comTrava(fn) {
@@ -241,9 +304,16 @@ function inscrever(req) {
       Telefone: soDigitos(d.telefone), Instituicao: limpa(d.instituicao),
       Identidade: limpa(d.identidade), Atuacao: limpa(d.atuacao),
       Cidade: limpa(d.cidade), UF: limpa(d.uf).toUpperCase().slice(0, 2),
-      DataInscricao: agora()
+      DataInscricao: agora(), Status: ST.INSCRITO, Token: novoToken()
     };
+    // Depois do sorteio, quem se inscreve entra no fim da lista de espera.
+    if (sorteioFeito()) {
+      insc.Status = ST.ESPERA;
+      insc.Origem = 'Inscrição após o sorteio';
+      insc.PosicaoEspera = ultimaPosicaoEspera() + 1;
+    }
     gravar('Inscritos', insc);
+    if (insc.Status === ST.ESPERA && CONFIG.AVISAR_ESPERA) enfileirar([{ tipo: 'espera', insc: insc }]);
     return { ok: true, painel: montarPainel(insc) };
   });
 }
@@ -257,6 +327,7 @@ function painel(req) {
 function montarPainel(insc) {
   const freq = frequencia(insc.Codigo);
   return {
+    situacao: situacao(insc),
     codigo: insc.Codigo,
     nome: insc.Nome,
     primeiroNome: insc.Nome.split(' ')[0],
@@ -312,6 +383,7 @@ function minicursosDo(codigo) {
 function registrarMinicurso(req) {
   const insc = inscritoPorCodigo(req.codigo);
   if (!insc) throw new Error('Inscrição não encontrada.');
+  exigirConfirmado(insc);
   const qr = lerQr(req.qr);
   if (!qr || qr.tipo !== 'M') throw new Error('Este não é um QR Code de minicurso do ' + CONFIG.EVENTO + '.');
   const mc = listaMinicursos().find(m => m.id === qr.valor);
@@ -435,6 +507,7 @@ function adminScan(req) {
     insc = inscritoPorCodigo(entrada); // código digitado à mão
   }
   if (!insc) throw new Error('Participante não encontrado.');
+  exigirConfirmado(insc);
 
   const dia = hoje();
   return comTrava(() => {
@@ -491,8 +564,410 @@ function setup() {
     ]);
   }
 
-  const props = PropertiesService.getScriptProperties();
-  if (!props.getProperty('ADMIN_SENHA')) props.setProperty('ADMIN_SENHA', 'coines2027');
-  Logger.log('Pronto. Senha do admin: ' + props.getProperty('ADMIN_SENHA') +
-    ' (troque em Configurações do projeto > Propriedades do script > ADMIN_SENHA)');
+  // Inscrições feitas antes desta versão: preenche situação e token que faltarem.
+  const semDados = ler('Inscritos').filter(i => !i.Status || !i.Token);
+  atualizar('Inscritos', semDados.map(i => ({
+    _linha: i._linha, Status: i.Status || ST.INSCRITO, Token: i.Token || novoToken()
+  })));
+
+  instalarRotina();
+
+  const p = props();
+  if (!p.getProperty('ADMIN_SENHA')) p.setProperty('ADMIN_SENHA', 'coines2027');
+  Logger.log('Pronto. Senha do admin: ' + p.getProperty('ADMIN_SENHA') +
+    ' (troque em Configurações do projeto > Propriedades do script > ADMIN_SENHA). ' +
+    'Cota de e-mails hoje: ' + MailApp.getRemainingDailyQuota());
+}
+
+// Roda de hora em hora (gatilho criado pelo setup).
+function instalarRotina() {
+  ScriptApp.getProjectTriggers()
+    .filter(t => t.getHandlerFunction() === 'rotina')
+    .forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('rotina').timeBased().everyHours(1).create();
+}
+
+function rotina() {
+  if (CONFIG.CHAMADA_AUTOMATICA && sorteioFeito()) {
+    comTrava(() => { encerrarPrazos(); chamarEspera(); });
+  }
+  processarFila();
+}
+
+/**
+ * SÓ PARA TESTES: desfaz o sorteio e volta todo mundo para "Inscrito".
+ * Execute pelo editor. Não use depois de mandar os e-mails reais.
+ */
+function desfazerSorteio() {
+  comTrava(() => {
+    atualizar('Inscritos', ler('Inscritos').map(i => ({
+      _linha: i._linha, Status: ST.INSCRITO, Origem: '', PosicaoEspera: '',
+      PrazoConfirmacao: '', Resposta: '', RespostaEm: ''
+    })));
+    atualizar('Emails', ler('Emails').filter(e => e.Status === 'Pendente')
+      .map(e => ({ _linha: e._linha, Status: 'Cancelado' })));
+    props().deleteProperty('SORTEIO_EM');
+  });
+  Logger.log('Sorteio desfeito.');
+}
+
+/* ======================= Sorteio, confirmação e lista de espera ======================= */
+
+function novoToken() {
+  return Utilities.getUuid().replace(/-/g, '') + Utilities.getUuid().replace(/-/g, '').slice(0, 8);
+}
+
+const statusDe = i => i.Status || ST.INSCRITO;
+const agoraIso = () => Utilities.formatDate(new Date(), CONFIG.FUSO, 'yyyy-MM-dd HH:mm');
+
+// Prazo: fim do dia (23:59) daqui a N dias.
+function prazoEmDias(dias) {
+  const d = new Date(Date.now() + Number(dias) * 86400000);
+  return Utilities.formatDate(d, CONFIG.FUSO, 'yyyy-MM-dd') + ' 23:59';
+}
+
+function prazoBr(iso) {
+  if (!iso) return '';
+  return dataBr(iso.slice(0, 10)) + ' às ' + iso.slice(11, 16);
+}
+
+const prazoVencido = i => !!i.PrazoConfirmacao && agoraIso() > i.PrazoConfirmacao;
+
+function ultimaPosicaoEspera(lista) {
+  return (lista || ler('Inscritos')).reduce((m, i) => Math.max(m, Number(i.PosicaoEspera) || 0), 0);
+}
+
+// Posição atual na fila (contando só quem ainda está esperando).
+function posicaoAtual(insc, lista) {
+  const minha = Number(insc.PosicaoEspera) || 0;
+  return (lista || ler('Inscritos'))
+    .filter(i => statusDe(i) === ST.ESPERA && (Number(i.PosicaoEspera) || 0) < minha).length + 1;
+}
+
+function exigirConfirmado(insc) {
+  if (!CONFIG.EXIGIR_CONFIRMACAO || !sorteioFeito()) return;
+  if (statusDe(insc) !== ST.CONFIRMADO) {
+    throw new Error('Presença não confirmada. Situação da inscrição: ' + situacao(insc).titulo + '.');
+  }
+}
+
+function situacao(insc) {
+  const st = statusDe(insc);
+  const s = { status: st, prazo: prazoBr(insc.PrazoConfirmacao), podeResponder: false, posicao: 0 };
+  if (st === ST.INSCRITO) {
+    s.titulo = 'Inscrição recebida';
+    s.texto = 'Aguarde o sorteio das ' + CONFIG.VAGAS + ' vagas presenciais. O resultado chega por e-mail.';
+  } else if (st === ST.SORTEADO) {
+    s.podeResponder = true;
+    if (insc.PrazoConfirmacao) {
+      s.titulo = 'Confirme sua presença';
+      s.texto = 'Você tem uma vaga no ' + CONFIG.EVENTO + '. Responda até ' + s.prazo +
+        '. Se não responder, a vaga passa para a lista de espera.';
+    } else {
+      s.titulo = 'Você foi sorteado(a)!';
+      s.texto = 'Em breve você vai receber por e-mail o pedido de confirmação. Se já sabe, pode responder agora.';
+    }
+  } else if (st === ST.CONFIRMADO) {
+    s.titulo = 'Presença confirmada';
+    s.texto = 'Sua vaga presencial está garantida. Mostre o QR Code presencial na entrada do evento.';
+    s.podeResponder = true;
+  } else if (st === ST.ESPERA) {
+    s.posicao = posicaoAtual(insc);
+    s.titulo = 'Lista de espera: posição ' + s.posicao;
+    s.texto = 'Se abrir uma vaga, você recebe um e-mail para confirmar. Confira também a caixa de spam.';
+  } else if (st === ST.RECUSOU) {
+    s.titulo = 'Você liberou sua vaga';
+    s.texto = 'Obrigado por avisar. A vaga foi passada para a próxima pessoa da lista de espera.';
+  } else if (st === ST.EXPIRADO) {
+    s.titulo = 'Prazo de confirmação encerrado';
+    s.texto = 'Não recebemos sua resposta no prazo, e a vaga passou para a lista de espera.';
+  }
+  return s;
+}
+
+function responder(req) {
+  const resposta = req.resposta;
+  if (resposta !== 'sim' && resposta !== 'nao') throw new Error('Resposta inválida.');
+  const r = comTrava(() => {
+    const lista = ler('Inscritos');
+    const token = String(req.token || '').trim();
+    const codigo = String(req.codigo || '').trim().toUpperCase();
+    const insc = token ? lista.find(i => i.Token === token) : (codigo ? lista.find(i => i.Codigo === codigo) : null);
+    if (!insc) throw new Error('Link inválido ou inscrição não encontrada.');
+    const st = statusDe(insc);
+    let mensagem;
+
+    if (st === ST.SORTEADO && prazoVencido(insc)) {
+      atualizar('Inscritos', [{ _linha: insc._linha, Status: ST.EXPIRADO }]);
+      chamarEspera();
+      mensagem = 'O prazo para responder terminou em ' + prazoBr(insc.PrazoConfirmacao) + '.';
+    } else if (st === ST.SORTEADO || st === ST.CONFIRMADO) {
+      if (resposta === 'sim') {
+        if (st !== ST.CONFIRMADO) {
+          atualizar('Inscritos', [{ _linha: insc._linha, Status: ST.CONFIRMADO, Resposta: 'Sim', RespostaEm: agora() }]);
+        }
+        mensagem = 'Nos vemos no ' + CONFIG.EVENTO + '! Seu QR Code de entrada está na sua inscrição.';
+      } else {
+        atualizar('Inscritos', [{ _linha: insc._linha, Status: ST.RECUSOU, Resposta: 'Não', RespostaEm: agora() }]);
+        chamarEspera();
+        mensagem = 'Tudo certo, sua vaga foi liberada para a lista de espera. Obrigado por avisar.';
+      }
+    } else {
+      mensagem = situacao(insc).titulo + '. ' + situacao(insc).texto;
+    }
+    return { mensagem: mensagem, codigo: insc.Codigo };
+  });
+  processarFila(); // manda logo o e-mail de quem foi chamado
+  return { ok: true, mensagem: r.mensagem, painel: montarPainel(inscritoPorCodigo(r.codigo)) };
+}
+
+// Marca como Expirado quem não respondeu no prazo. Chamar dentro de comTrava.
+function encerrarPrazos() {
+  const vencidos = ler('Inscritos').filter(i => statusDe(i) === ST.SORTEADO && prazoVencido(i));
+  atualizar('Inscritos', vencidos.map(i => ({ _linha: i._linha, Status: ST.EXPIRADO })));
+  return vencidos.length;
+}
+
+// Ocupa as vagas livres com a lista de espera, na ordem. Chamar dentro de comTrava.
+function chamarEspera() {
+  if (!sorteioFeito()) return 0;
+  const lista = ler('Inscritos');
+  const ocupadas = lista.filter(i => statusDe(i) === ST.SORTEADO || statusDe(i) === ST.CONFIRMADO).length;
+  const livres = CONFIG.VAGAS - ocupadas;
+  if (livres <= 0) return 0;
+  const chamados = lista
+    .filter(i => statusDe(i) === ST.ESPERA)
+    .sort((a, b) => (Number(a.PosicaoEspera) || 0) - (Number(b.PosicaoEspera) || 0))
+    .slice(0, livres);
+  const prazo = prazoEmDias(CONFIG.PRAZO_CHAMADA_DIAS);
+  atualizar('Inscritos', chamados.map(i => ({
+    _linha: i._linha, Status: ST.SORTEADO, Origem: 'Lista de espera', PrazoConfirmacao: prazo
+  })));
+  enfileirar(chamados.map(i => ({ tipo: 'chamada', insc: i })));
+  return chamados.length;
+}
+
+function resumo() {
+  const lista = ler('Inscritos');
+  const conta = st => lista.filter(i => statusDe(i) === st).length;
+  const sorteados = lista.filter(i => statusDe(i) === ST.SORTEADO);
+  const ocupadas = sorteados.length + conta(ST.CONFIRMADO);
+  const emails = ler('Emails');
+  let cota = null;
+  try { cota = MailApp.getRemainingDailyQuota(); } catch (e) {}
+  return {
+    vagas: CONFIG.VAGAS,
+    sorteioEm: props().getProperty('SORTEIO_EM') || '',
+    total: lista.length,
+    inscritos: conta(ST.INSCRITO),
+    aguardando: sorteados.length,
+    semPedido: sorteados.filter(i => !i.PrazoConfirmacao).length,
+    vencidos: sorteados.filter(prazoVencido).length,
+    confirmados: conta(ST.CONFIRMADO),
+    recusaram: conta(ST.RECUSOU),
+    expirados: conta(ST.EXPIRADO),
+    espera: conta(ST.ESPERA),
+    vagasLivres: Math.max(CONFIG.VAGAS - ocupadas, 0),
+    emailsPendentes: emails.filter(e => e.Status === 'Pendente').length,
+    emailsEnviados: emails.filter(e => e.Status === 'Enviado').length,
+    emailsErro: emails.filter(e => e.Status === 'Erro').length,
+    cotaEmail: cota,
+    prazoConfirmacaoDias: CONFIG.PRAZO_CONFIRMACAO_DIAS,
+    prazoChamadaDias: CONFIG.PRAZO_CHAMADA_DIAS,
+    chamadaAutomatica: CONFIG.CHAMADA_AUTOMATICA
+  };
+}
+
+function adminResumo(req) {
+  checarSenha(req);
+  return { ok: true, resumo: resumo() };
+}
+
+function adminSortear(req) {
+  checarSenha(req);
+  const r = comTrava(() => {
+    if (sorteioFeito()) throw new Error('O sorteio já foi feito em ' + props().getProperty('SORTEIO_EM') + '.');
+    const candidatos = ler('Inscritos').filter(i => statusDe(i) === ST.INSCRITO);
+    if (!candidatos.length) throw new Error('Não há inscritos para sortear.');
+    // Embaralhamento de Fisher-Yates
+    for (let k = candidatos.length - 1; k > 0; k--) {
+      const j = Math.floor(Math.random() * (k + 1));
+      const t = candidatos[k]; candidatos[k] = candidatos[j]; candidatos[j] = t;
+    }
+    const sorteados = candidatos.slice(0, CONFIG.VAGAS);
+    const espera = candidatos.slice(CONFIG.VAGAS);
+    atualizar('Inscritos', sorteados.map(i => ({ _linha: i._linha, Status: ST.SORTEADO, Origem: 'Sorteio' }))
+      .concat(espera.map((i, n) => ({ _linha: i._linha, Status: ST.ESPERA, Origem: 'Sorteio', PosicaoEspera: n + 1 }))));
+    enfileirar(sorteados.map(i => ({ tipo: 'sorteado', insc: i }))
+      .concat(CONFIG.AVISAR_ESPERA ? espera.map(i => ({ tipo: 'espera', insc: i })) : []));
+    props().setProperty('SORTEIO_EM', agora());
+    return { sorteados: sorteados.length, espera: espera.length };
+  });
+  processarFila();
+  return { ok: true, mensagem: 'Sorteio feito: ' + r.sorteados + ' sorteados e ' + r.espera + ' na lista de espera.', resumo: resumo() };
+}
+
+function adminPedirConfirmacao(req) {
+  checarSenha(req);
+  const dias = Math.max(1, Math.min(60, Number(req.dias) || CONFIG.PRAZO_CONFIRMACAO_DIAS));
+  const n = comTrava(() => {
+    if (!sorteioFeito()) throw new Error('Faça o sorteio primeiro.');
+    const alvo = ler('Inscritos').filter(i => statusDe(i) === ST.SORTEADO && !i.PrazoConfirmacao);
+    const prazo = prazoEmDias(dias);
+    atualizar('Inscritos', alvo.map(i => ({ _linha: i._linha, PrazoConfirmacao: prazo })));
+    enfileirar(alvo.map(i => ({ tipo: 'confirmacao', insc: i })));
+    return alvo.length;
+  });
+  processarFila();
+  return { ok: true, mensagem: n ? 'Pedido de confirmação gerado para ' + n + ' pessoa(s).' : 'Todos os sorteados já receberam o pedido.', resumo: resumo() };
+}
+
+function adminChamarEspera(req) {
+  checarSenha(req);
+  const r = comTrava(() => {
+    if (!sorteioFeito()) throw new Error('Faça o sorteio primeiro.');
+    return { expirados: encerrarPrazos(), chamados: chamarEspera() };
+  });
+  processarFila();
+  return {
+    ok: true,
+    mensagem: r.expirados + ' prazo(s) encerrado(s). ' + r.chamados + ' pessoa(s) chamada(s) da lista de espera.',
+    resumo: resumo()
+  };
+}
+
+function adminEnviarEmails(req) {
+  checarSenha(req);
+  const r = processarFila();
+  return { ok: true, mensagem: r.enviados + ' e-mail(s) enviado(s). ' + r.restantes + ' na fila.', resumo: resumo() };
+}
+
+/* ======================= E-mails (fila) ======================= */
+
+// itens: [{ tipo, insc }]
+function enfileirar(itens) {
+  gravarVarios('Emails', itens.filter(x => x.insc && x.insc.Email).map(x => ({
+    Criado: agora(), Tipo: x.tipo, Codigo: x.insc.Codigo, Email: x.insc.Email, Nome: x.insc.Nome, Status: 'Pendente'
+  })));
+}
+
+// Envia o que der dentro da cota diária do Gmail. O resto sai na próxima rodada da rotina.
+function processarFila() {
+  const trava = LockService.getDocumentLock() || LockService.getScriptLock();
+  if (!trava.tryLock(2000)) return { enviados: 0, restantes: -1 };
+  try {
+    const pendentes = ler('Emails').filter(e => e.Status === 'Pendente');
+    if (!pendentes.length) return { enviados: 0, restantes: 0 };
+    const lista = ler('Inscritos');
+    const porCodigo = {};
+    lista.forEach(i => { porCodigo[i.Codigo] = i; });
+    let cota = MailApp.getRemainingDailyQuota();
+    const inicio = Date.now();
+    const alteracoes = [];
+    let enviados = 0;
+    for (const e of pendentes) {
+      if (cota <= 0 || Date.now() - inicio > 4 * 60 * 1000) break;
+      const insc = porCodigo[e.Codigo];
+      if (!insc || !emailAindaFazSentido(e.Tipo, insc)) {
+        alteracoes.push({ _linha: e._linha, Status: 'Ignorado', Erro: 'Situação mudou antes do envio' });
+        continue;
+      }
+      try {
+        const m = montarEmail(e.Tipo, insc, lista);
+        const opcoes = { to: insc.Email, subject: m.assunto, htmlBody: m.html, body: m.texto, name: CONFIG.REMETENTE };
+        if (CONFIG.RESPONDER_PARA) opcoes.replyTo = CONFIG.RESPONDER_PARA;
+        MailApp.sendEmail(opcoes);
+        alteracoes.push({ _linha: e._linha, Status: 'Enviado', Enviado: agora(), Erro: '' });
+        enviados++; cota--;
+      } catch (err) {
+        alteracoes.push({ _linha: e._linha, Status: 'Erro', Erro: String(err.message || err).slice(0, 200) });
+        if (/limit|quota|cota/i.test(String(err))) break;
+      }
+    }
+    atualizar('Emails', alteracoes);
+    return { enviados: enviados, restantes: pendentes.length - alteracoes.length };
+  } finally {
+    trava.releaseLock();
+  }
+}
+
+function emailAindaFazSentido(tipo, insc) {
+  const st = statusDe(insc);
+  if (tipo === 'sorteado') return st === ST.SORTEADO || st === ST.CONFIRMADO;
+  if (tipo === 'confirmacao' || tipo === 'chamada') return st === ST.SORTEADO;
+  if (tipo === 'espera') return st === ST.ESPERA;
+  return true;
+}
+
+function montarEmail(tipo, insc, lista) {
+  const nome = insc.Nome.split(' ')[0];
+  const ev = CONFIG.EVENTO;
+  const linkSim = CONFIG.SITE_URL + '?t=' + insc.Token + '&r=sim';
+  const linkNao = CONFIG.SITE_URL + '?t=' + insc.Token + '&r=nao';
+  const prazo = prazoBr(insc.PrazoConfirmacao);
+  const botoesResposta =
+    botao(linkSim, 'Sim, vou ao evento presencial', '#1F9D55') + ' ' + botao(linkNao, 'Não vou poder ir', '#C62828');
+  let assunto, paragrafos, extra = '';
+
+  if (tipo === 'sorteado') {
+    assunto = ev + ': você foi sorteado(a)!';
+    paragrafos = [
+      'Parabéns! Você foi sorteado(a) para uma das ' + CONFIG.VAGAS + ' vagas presenciais do ' + ev + ', de ' + CONFIG.PERIODO_TEXTO + '.',
+      'Em breve você vai receber outro e-mail pedindo a confirmação da sua presença. Fique de olho na sua caixa de entrada e no spam.'
+    ];
+    extra = botao(CONFIG.SITE_URL, 'Ver minha inscrição', '#0B3D91');
+  } else if (tipo === 'espera') {
+    const pos = posicaoAtual(insc, lista);
+    assunto = ev + ': você está na lista de espera';
+    paragrafos = [
+      'Obrigado pela sua inscrição no ' + ev + '. As ' + CONFIG.VAGAS + ' vagas presenciais foram preenchidas no sorteio, e você está na lista de espera, na posição ' + pos + '.',
+      'Se alguém liberar a vaga, você recebe um e-mail para confirmar. Fique de olho na sua caixa de entrada e no spam.'
+    ];
+    extra = botao(CONFIG.SITE_URL, 'Acompanhar minha posição', '#0B3D91');
+  } else if (tipo === 'confirmacao') {
+    assunto = ev + ': confirme sua presença até ' + prazo;
+    paragrafos = [
+      'Você foi sorteado(a) para o ' + ev + ', de ' + CONFIG.PERIODO_TEXTO + '.',
+      'Você vai participar do evento presencial? Responda até <b>' + prazo + '</b>. Se não responder, a vaga passa para a lista de espera.'
+    ];
+    extra = botoesResposta;
+  } else if (tipo === 'chamada') {
+    assunto = ev + ': abriu uma vaga para você!';
+    paragrafos = [
+      'Boa notícia: abriu uma vaga presencial no ' + ev + ', de ' + CONFIG.PERIODO_TEXTO + ', e ela é sua.',
+      'Você vai participar do evento presencial? Responda até <b>' + prazo + '</b>. Se não responder, a vaga passa para a próxima pessoa da lista.'
+    ];
+    extra = botoesResposta;
+  } else {
+    throw new Error('Tipo de e-mail desconhecido: ' + tipo);
+  }
+
+  const html =
+    '<div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;color:#1A2233">' +
+    '<div style="background:#0B3D91;color:#fff;padding:18px 22px;border-radius:12px 12px 0 0;font-size:22px;font-weight:bold">' +
+    'COINES <span style="color:#F5B700">2027</span></div>' +
+    '<div style="border:1px solid #DDE3EE;border-top:0;padding:22px;border-radius:0 0 12px 12px;font-size:16px;line-height:1.5">' +
+    '<p>Olá, ' + escHtml(nome) + '!</p>' +
+    paragrafos.map(p => '<p>' + p + '</p>').join('') +
+    '<p style="margin:24px 0">' + extra + '</p>' +
+    '<p style="color:#5B6478;font-size:13px">' + CONFIG.ASSINATURA + '<br>' + CONFIG.INSTITUICAO + '</p>' +
+    '</div></div>';
+
+  const texto = 'Olá, ' + nome + '!\n\n' +
+    paragrafos.map(p => p.replace(/<[^>]+>/g, '')).join('\n\n') + '\n\n' +
+    (tipo === 'confirmacao' || tipo === 'chamada'
+      ? 'Sim, vou: ' + linkSim + '\nNão vou poder ir: ' + linkNao
+      : CONFIG.SITE_URL) +
+    '\n\n' + CONFIG.ASSINATURA;
+
+  return { assunto: assunto, html: html, texto: texto };
+}
+
+function botao(url, rotulo, cor) {
+  return '<a href="' + url + '" style="display:inline-block;background:' + cor +
+    ';color:#fff;text-decoration:none;padding:12px 18px;border-radius:10px;font-weight:bold;margin:4px 0">' + rotulo + '</a>';
+}
+
+function escHtml(s) {
+  return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
