@@ -13,8 +13,8 @@ const CONFIG = {
   INSTITUICAO: 'Instituto Nacional de Educação de Surdos (INES)',
   CIDADE: 'Rio de Janeiro',
   ASSINATURA: 'Coordenação do COINES 2027',
-  DIAS_EVENTO: ['2027-10-20', '2027-10-21', '2027-10-22'], // formato AAAA-MM-DD
-  PERIODO_TEXTO: '20 a 22 de outubro de 2027',
+  DIAS_EVENTO: ['2027-09-22', '2027-09-23', '2027-09-24'], // formato AAAA-MM-DD
+  PERIODO_TEXTO: '22 a 24 de setembro de 2027',
   FREQ_MINIMA: 75,              // % mínimo para liberar o certificado do evento
   CARGA_HORARIA_EVENTO: 24,     // horas
   VALIDAR_HORARIO_MINICURSO: true, // só aceita o QR do minicurso no dia e horário dele
@@ -486,8 +486,8 @@ function setup() {
   const mc = aba('Minicursos');
   if (mc.getLastRow() < 2) {
     mc.getRange(2, 1, 2, 8).setValues([
-      ['MC01', 'Introdução à Libras', '20/10/2027', '09:00', '12:00', 'Sala 1', '3', 'Nome do ministrante'],
-      ['MC02', 'Literatura surda', '21/10/2027', '14:00', '17:00', 'Sala 2', '3', 'Nome do ministrante']
+      ['MC01', 'Introdução à Libras', '22/09/2027', '09:00', '12:00', 'Sala 1', '3', 'Nome do ministrante'],
+      ['MC02', 'Literatura surda', '23/09/2027', '14:00', '17:00', 'Sala 2', '3', 'Nome do ministrante']
     ]);
   }
 
